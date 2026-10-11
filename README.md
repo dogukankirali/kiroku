@@ -9,6 +9,7 @@
 
 - **Anime archive**: grid and table views, infinite scroll, name search (`Ctrl K`), genre/format/status/score/episode/series filters, column sorting and editing.
 - **Watchlist**: every anime marked "Plan to Watch" lands on the list automatically. Whether it comes from the web UI, the extension or a sync, a DB trigger keeps the list up to date. Drag-and-drop ordering.
+- **Waitlist** (`/waitlist`): anime that haven't aired yet, added from AniList's upcoming list. They stay in the archive and table but not in the watchlist; airing notifications also go to waitlisted anime.
 - **Profile**: stats (archive, completed, average score), top 10 rated anime, profile and password editing. Personalized recommendations are on the way ([#39](https://github.com/dogukankirali/local-db-app/issues/39)).
 - **Accounts**: sign-up/sign-in with JWT, password reset by email (single-use link, valid for 1 hour).
 - **AniList sync**: fills in missing details, scores and series relations of archived anime in bulk.
@@ -170,6 +171,7 @@ No license has been specified for this project yet.
 
 - **Anime arşivi**: Kart (grid) ve tablo görünümü, sonsuz kaydırma, isim araması (`Ctrl K`), tür/format/durum/puan/bölüm/seri filtreleri, sütun sıralama ve düzenleme.
 - **Watchlist**: "Plan to Watch" işaretli her anime otomatik olarak listeye girer. Web arayüzü, eklenti ya da senkronizasyon fark etmez; DB trigger'ı listeyi her zaman güncel tutar. Sürükle-bırak ile sıralama.
+- **Waitlist** (`/waitlist`): henüz yayınlanmamış animeler, AniList'in yakında çıkacaklar listesinden eklenir. Arşivde ve tabloda görünür ama watchlist'te görünmez; yayın bildirimleri waitlist'tekilere de gider.
 - **Profil**: İstatistikler (arşiv, tamamlanan, ortalama puan), en yüksek puanlı 10 anime, profil ve şifre düzenleme. Kişiye özel öneriler yolda ([#39](https://github.com/dogukankirali/local-db-app/issues/39)).
 - **Hesaplar**: JWT ile kayıt/giriş, e-posta ile şifre sıfırlama (tek kullanımlık, 1 saat geçerli bağlantı).
 - **AniList senkronizasyonu**: Arşivdeki animelerin eksik bilgilerini, puanlarını ve seri ilişkilerini toplu doldurur.

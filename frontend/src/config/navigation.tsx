@@ -7,6 +7,7 @@ import LiveTvOutlinedIcon from "@mui/icons-material/LiveTvOutlined";
 import CollectionsBookmarkOutlinedIcon from "@mui/icons-material/CollectionsBookmarkOutlined";
 import TheatersOutlinedIcon from "@mui/icons-material/TheatersOutlined";
 import BookmarksOutlinedIcon from "@mui/icons-material/BookmarksOutlined";
+import HourglassTopRoundedIcon from "@mui/icons-material/HourglassTopRounded";
 import BookmarkAddedOutlinedIcon from "@mui/icons-material/BookmarkAddedOutlined";
 
 export interface NavItem {
@@ -41,6 +42,7 @@ export const navSections: NavSection[] = [
     title: "Takip",
     items: [
       { label: "Watchlist", href: "/watchlist", icon: <BookmarksOutlinedIcon />, description: "Sıradaki izlemeler" },
+      { label: "Waitlist", href: "/waitlist", icon: <HourglassTopRoundedIcon />, description: "Yayınlanmasını beklediklerin" },
       { label: "Readlist", href: "/readlist", icon: <BookmarkAddedOutlinedIcon />, description: "Sıradaki okumalar" },
     ],
   },

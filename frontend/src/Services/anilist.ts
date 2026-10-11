@@ -1,6 +1,7 @@
 // AniList, Cloudflare Workers'ın çıkış IP'lerini engelliyor; bu yüzden AniList'e
 // doğrudan tarayıcıdan gidilir (AniList CORS'a izin veriyor, eklenti de böyle çağırıyor).
 // Worker yalnızca sonuçları DB'ye yazar.
+import type { Relation } from "../lib/seriesTitle";
 
 const ANILIST = "https://graphql.anilist.co";
 
@@ -144,10 +145,11 @@ export type AniListManga = {
   genres: string[];
   coverImage: { extraLarge: string | null; large: string | null } | null;
   siteUrl: string;
+  relations?: { edges: Relation[] } | null;
 };
 
 const MANGA_FIELDS = `id idMal title { romaji english native } chapters volumes status format averageScore genres
-  coverImage { extraLarge large } siteUrl`;
+  coverImage { extraLarge large } siteUrl relations { edges { relationType node { type title { romaji english } } } }`;
 
 export async function searchManga(search: string, signal?: AbortSignal): Promise<AniListManga[]> {
   const data = await anilistQuery<{ Page: { media: AniListManga[] } }>(

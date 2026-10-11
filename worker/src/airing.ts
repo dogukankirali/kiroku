@@ -50,6 +50,7 @@ type AiringUpdate = {
   nextEpisode: number | null;
   nextEpisodeAt: string | null;
   aired: number | null;
+  startDate?: string;
   anilistId?: number;
   kitsuId?: number;
 };
@@ -86,7 +87,8 @@ async function applyUpdates(env: Env, updates: AiringUpdate[], origin: string) {
              anime_status = CASE WHEN ? <> '' THEN ? ELSE anime_status END,
              total_number_of_episodes = CASE WHEN ? > 0 THEN ? ELSE total_number_of_episodes END,
              mal_score = CASE WHEN ? > 0 THEN ? ELSE mal_score END,
-             next_episode = ?, next_episode_at = ?, aired_episodes = COALESCE(?, aired_episodes), airing_checked_at = ?
+             next_episode = ?, next_episode_at = ?, aired_episodes = COALESCE(?, aired_episodes), airing_checked_at = ?,
+             start_date = COALESCE(NULLIF(?, ''), start_date)
            WHERE id = ?`
         )
         .bind(
@@ -95,6 +97,7 @@ async function applyUpdates(env: Env, updates: AiringUpdate[], origin: string) {
           u.episodes, u.episodes,
           u.score, u.score,
           u.nextEpisode, u.nextEpisodeAt, u.aired, now,
+          u.startDate ?? "",
           u.id
         )
     );
@@ -115,7 +118,7 @@ async function notify(env: Env, fresh: NewEpisode[], origin: string) {
   const { results } = await env.DB.prepare(
     `SELECT u.id AS user_id, u.notify_new_episodes AS notify, ua.anime_id FROM users u
      JOIN user_anime ua ON ua.user_id = u.id
-     WHERE u.is_active = 1 AND (ua.watch_status <> 0 OR ua.plan_to_watch = 1)
+     WHERE u.is_active = 1 AND (ua.watch_status <> 0 OR ua.plan_to_watch = 1 OR ua.wait_list = 1)
        AND ua.anime_id IN (${ids.map(() => "?").join(", ")})`
   )
     .bind(...ids)
@@ -236,12 +239,12 @@ export async function runAiringCheck(env: Env, origin = "") {
 
   // 2) Durum, toplam bölüm, puan ve sıradaki yayın tarihi: 20'şerli gruplar
   const mapped = candidates.filter((c) => c.kitsu_id);
-  const info = new Map<number, { status: string; episodeCount: number | null; averageRating: string | null; nextRelease: string | null }>();
+  const info = new Map<number, { status: string; episodeCount: number | null; averageRating: string | null; nextRelease: string | null; startDate: string | null }>();
   for (let i = 0; i < mapped.length; i += 20) {
     const ids = mapped.slice(i, i + 20).map((c) => c.kitsu_id).join(",");
     try {
-      const res = await kitsu<{ data: { id: string; attributes: { status: string; episodeCount: number | null; averageRating: string | null; nextRelease: string | null } }[] }>(
-        `/anime?filter[id]=${ids}&page[limit]=20&fields[anime]=status,episodeCount,averageRating,nextRelease`
+      const res = await kitsu<{ data: { id: string; attributes: { status: string; episodeCount: number | null; averageRating: string | null; nextRelease: string | null; startDate: string | null } }[] }>(
+        `/anime?filter[id]=${ids}&page[limit]=20&fields[anime]=status,episodeCount,averageRating,nextRelease,startDate`
       );
       for (const a of res.data) info.set(Number(a.id), a.attributes);
     } catch (err) {
@@ -286,6 +289,7 @@ export async function runAiringCheck(env: Env, origin = "") {
       nextEpisode: nextAt && aired != null ? aired + 1 : null,
       nextEpisodeAt: nextAt,
       aired,
+      startDate: a.startDate ?? "",
     });
   }
   const result = await applyUpdates(env, updates, origin);

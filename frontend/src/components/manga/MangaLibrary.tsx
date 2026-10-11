@@ -45,6 +45,7 @@ import { MangaService, errorText, fromAniList, type Manga, type MangaQuery } fro
 import { AniListRateLimit, mangaForSync } from "../../Services/anilist";
 import { GenreChips } from "../Common/GenreChip";
 import { palette } from "../../theme/customTheme";
+import { useDelayedFlag } from "../../lib/useDelayedFlag";
 import MangaEditorDialog from "./MangaEditorDialog";
 import LibrarySyncDialog from "./LibrarySyncDialog";
 import FolderSyncRoundedIcon from "@mui/icons-material/FolderCopyOutlined";
@@ -117,6 +118,7 @@ const SORT_OPTIONS = [
 
 const COLUMNS: { key: string; label: string; sort?: string; align?: "right" }[] = [
   { key: "name", label: "Ad", sort: "name" },
+  { key: "series", label: "Seri" },
   { key: "status", label: "Yayın", sort: "status" },
   { key: "readStatus", label: "Durumum", sort: "read-status" },
   { key: "progress", label: "Bölüm", sort: "progress", align: "right" },
@@ -140,6 +142,8 @@ export default function MangaLibrary() {
   const [total, setTotal] = useState(0);
   const [genres, setGenres] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  // Hızlı (ör. boş) yüklemelerde iskelet bir anlığına görünüp kaybolmasın
+  const showSkeleton = useDelayedFlag(loading && !data.length);
   const [error, setError] = useState("");
   const [toast, setToast] = useState<Toast>(null);
   const [editing, setEditing] = useState<Manga | null | undefined>(undefined);
@@ -305,7 +309,7 @@ export default function MangaLibrary() {
 
       {loading && !data.length ? (
         <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 2 }}>
-          {Array.from({ length: 12 }).map((_, i) => <Skeleton key={i} variant="rounded" sx={{ aspectRatio: "2 / 3", height: "auto", borderRadius: "14px", bgcolor: alpha(palette.overlay, 0.04) }} />)}
+          {showSkeleton && Array.from({ length: 12 }).map((_, i) => <Skeleton key={i} variant="rounded" sx={{ aspectRatio: "2 / 3", height: "auto", borderRadius: "14px", bgcolor: alpha(palette.overlay, 0.04) }} />)}
         </Box>
       ) : !data.length && !error ? (
         <Box sx={{ textAlign: "center", py: 8, borderRadius: "16px", border: `1px dashed ${alpha(palette.overlay, 0.12)}` }}>
@@ -338,6 +342,7 @@ export default function MangaLibrary() {
                       </Box>
                     </Box>
                   </TableCell>
+                  <TableCell>{m.seriesName || "—"}</TableCell>
                   <TableCell>{PUB_STATUS_LABEL[m.status] ?? m.status}</TableCell>
                   <TableCell><ReadStatusChip status={m.readStatus} /></TableCell>
                   <TableCell align="right">{progressText(m.chaptersRead, m.totalChapters)}</TableCell>

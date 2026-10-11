@@ -102,6 +102,7 @@ function MangaDetail() {
           </Box>
           <Box sx={{ display: "flex", gap: 0.75, flexWrap: "wrap" }}>
             {manga.readStatus && <Chip size="small" label={READ_STATUS_LABEL[manga.readStatus]} sx={{ color, backgroundColor: alpha(color, 0.14) }} />}
+            {manga.seriesName && <Chip size="small" variant="outlined" label={`Seri: ${manga.seriesName}`} />}
             {manga.format && <Chip size="small" label={FORMAT_LABEL[manga.format] ?? manga.format} />}
             {manga.status && <Chip size="small" label={PUB_STATUS_LABEL[manga.status] ?? manga.status} />}
             {manga.malScore > 0 && <Chip size="small" label={`Ortalama ${manga.malScore.toFixed(1)}`} />}

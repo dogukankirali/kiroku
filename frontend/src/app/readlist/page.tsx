@@ -17,6 +17,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { MangaService, errorText, type ReadlistItem } from "../../Services/MangaService";
 import { PUB_STATUS_LABEL } from "../../components/manga/mangaLabels";
 import { palette } from "../../theme/customTheme";
+import { useDelayedFlag } from "../../lib/useDelayedFlag";
 
 function Row({ item, index, onRemove }: { item: ReadlistItem; index: number; onRemove: (i: ReadlistItem) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: String(item.id) });
@@ -58,6 +59,8 @@ function Row({ item, index, onRemove }: { item: ReadlistItem; index: number; onR
 export default function ReadlistPage() {
   const [items, setItems] = useState<ReadlistItem[]>([]);
   const [loading, setLoading] = useState(true);
+  // Hızlı (ör. boş) yüklemelerde iskelet bir anlığına görünüp kaybolmasın
+  const showSkeleton = useDelayedFlag(loading);
   const [error, setError] = useState("");
   const [toast, setToast] = useState<{ severity: "success" | "error"; text: string } | null>(null);
 
@@ -120,7 +123,7 @@ export default function ReadlistPage() {
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       {loading ? (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
-          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} variant="rounded" height={96} sx={{ borderRadius: "14px" }} />)}
+          {showSkeleton && Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} variant="rounded" height={96} sx={{ borderRadius: "14px" }} />)}
         </Box>
       ) : !items.length && !error ? (
         <Box sx={{ textAlign: "center", py: 8, borderRadius: "16px", border: `1px dashed ${alpha(palette.overlay, 0.12)}` }}>

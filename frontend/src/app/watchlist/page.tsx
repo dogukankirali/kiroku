@@ -41,6 +41,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { API_URL } from "../../constants/Constants";
 import { palette } from "../../theme/customTheme";
+import { useDelayedFlag } from "../../lib/useDelayedFlag";
 
 interface AnimeData {
   ID: number;
@@ -203,6 +204,8 @@ export default function WatchListPage() {
   const router = useRouter();
   const [watchList, setWatchList] = useState<WatchListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  // Hızlı (ör. boş) yüklemelerde iskelet bir anlığına görünüp kaybolmasın
+  const showSkeleton = useDelayedFlag(loading);
   const [loadError, setLoadError] = useState("");
   const [toast, setToast] = useState<Toast>(null);
 
@@ -299,7 +302,7 @@ export default function WatchListPage() {
 
       {loading ? (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
-          {Array.from({ length: 5 }).map((_, i) => (
+          {showSkeleton && Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} variant="rounded" height={96} sx={{ borderRadius: "14px", bgcolor: alpha(palette.overlay, 0.04) }} />
           ))}
         </Box>

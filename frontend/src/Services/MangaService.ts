@@ -1,6 +1,7 @@
 import axios from "axios";
 import { API_BASE } from "./http";
 import type { AniListManga } from "./anilist";
+import { seriesNameFrom } from "../lib/seriesTitle";
 
 export type ReadStatus = "" | "READING" | "COMPLETED" | "PAUSED" | "DROPPED" | "PLANNING";
 
@@ -21,6 +22,7 @@ export interface Manga {
   anilistLink: string;
   syncedAt: string;
   mangadexId: string;
+  seriesName: string;
   score: number;
   readStatus: ReadStatus;
   chaptersRead: number;
@@ -134,6 +136,7 @@ export function fromAniList(m: AniListManga): MangaInput {
     malId: m.idMal ?? 0,
     malLink: m.idMal ? `https://myanimelist.net/manga/${m.idMal}` : "",
     anilistLink: m.siteUrl,
+    seriesName: seriesNameFrom(m.title.romaji ?? m.title.english ?? "", m.relations?.edges, "MANGA"),
   };
 }
 

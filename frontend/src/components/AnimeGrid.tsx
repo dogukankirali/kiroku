@@ -5,6 +5,7 @@ import { flushSync } from "react-dom";
 import { Box, Typography, Chip, Skeleton, Tooltip } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import { palette } from "../theme/customTheme";
+import { useDelayedFlag } from "../lib/useDelayedFlag";
 import StarIcon from "@mui/icons-material/Star";
 import BookmarkIcon from "@mui/icons-material/Bookmark";
 import AnimeDetailModal, { COVER_TRANSITION_NAME, getCoverSrc, getStatusInfo } from "./anime/AnimeDetailModal";
@@ -319,6 +320,9 @@ export default function AnimeGrid({
   useEffect(() => {
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
+    // Son sayfadayken tetiklenen istek hiçbir şey yüklemez; bayrak takılı kalırsa liste değişince
+    // (ör. arama temizlenince) sonsuz kaydırma durur. Yeni gözlemciyle birlikte bayrak gerçek duruma döner.
+    isLoadingMoreRef.current = loadingMore;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -337,6 +341,8 @@ export default function AnimeGrid({
   }, [onLoadMore, loading, loadingMore, allData.length]);
 
   const initialLoading = loading && allData.length === 0;
+  // Hızlı (ör. boş sonuç) yüklemelerde iskelet bir anlığına görünüp kaybolmasın
+  const showSkeleton = useDelayedFlag(initialLoading);
 
   if (!initialLoading && (!allData || allData.length === 0)) {
     return (
@@ -361,7 +367,7 @@ export default function AnimeGrid({
     >
       <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0, mx: -1 }}>
         {initialLoading ? (
-          <SkeletonCards count={gridSize * 3} gridSize={gridSize} />
+          showSkeleton && <SkeletonCards count={gridSize * 3} gridSize={gridSize} />
         ) : (
           allData.map((anime, index) => (
             <AnimeCard
