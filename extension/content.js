@@ -750,8 +750,82 @@ function attachFloatingButton(button) {
     document.body.appendChild(button);
 }
 
+// ------------------------------------------------------------
+// İzlemeyi algıla: izleme sayfasında bir süre kalınca "kaydedelim mi / puanlayalım mı" diye sorar
+// ------------------------------------------------------------
+const WATCH_PROMPT_DELAY_MS = 90_000;
+let watchPromptKey = '';
+let watchPromptTimer = null;
+
+function isWatchPage() {
+    const url = location.href;
+    return (url.includes('anizium.co/watch') || url.includes('anizium.com/watch') || url.includes('tranimeizle.top/izle') || url.includes('turkanime.co/video')) && extractEpisodeNumber(url) > 0;
+}
+
+function scheduleWatchPrompt() {
+    if (!isTopFrame || !extensionEnabled || !isWatchPage()) {
+        clearTimeout(watchPromptTimer); watchPromptTimer = null; watchPromptKey = '';
+        document.getElementById('kiroku-watch-prompt')?.remove();
+        return;
+    }
+    const key = location.href;
+    if (key === watchPromptKey) return;
+    watchPromptKey = key;
+    clearTimeout(watchPromptTimer);
+    watchPromptTimer = setTimeout(() => {
+        chrome.storage.local.get(['watch_prompt', 'watch_prompted'], (data) => {
+            if (data.watch_prompt === false) return;
+            const ep = getStreamingEpisodeData();
+            if (!ep.name || document.hidden) return;
+            const id = `${ep.name}#${ep.currentEpisode}`;
+            const done = data.watch_prompted || {};
+            if (done[id]) return;
+            done[id] = Date.now();
+            // Eski kayıtları temizle (en fazla 200)
+            const keys = Object.keys(done).sort((a, b) => done[a] - done[b]);
+            while (keys.length > 200) delete done[keys.shift()];
+            chrome.storage.local.set({ watch_prompted: done });
+            showWatchPrompt(ep);
+        });
+    }, WATCH_PROMPT_DELAY_MS);
+}
+
+function showWatchPrompt(ep) {
+    document.getElementById('kiroku-watch-prompt')?.remove();
+    const box = document.createElement('div');
+    box.id = 'kiroku-watch-prompt';
+    box.style.cssText = 'position:fixed;right:20px;bottom:80px;z-index:2147483647;max-width:300px;padding:14px;border-radius:10px;background:rgba(18,18,18,.95);color:#fff;font:13px system-ui,sans-serif;border:1px solid rgba(255,255,255,.12);box-shadow:0 6px 20px rgba(0,0,0,.5)';
+    const title = document.createElement('div');
+    title.style.cssText = 'font-weight:600;margin-bottom:8px';
+    title.textContent = `${ep.name} · Bölüm ${ep.currentEpisode} izleniyor. Kiroku'ya kaydedelim mi?`;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap';
+    const score = document.createElement('select');
+    score.style.cssText = 'background:#222;color:#fff;border:1px solid #444;border-radius:6px;padding:4px';
+    score.innerHTML = '<option value="">Puan yok</option>' + Array.from({ length: 10 }, (_, i) => `<option value="${10 - i}">${10 - i}</option>`).join('');
+    const mk = (label, bg) => { const b = document.createElement('button'); b.textContent = label; b.style.cssText = `background:${bg};color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font:inherit`; return b; };
+    const yes = mk('Kaydet', '#7C5CFF');
+    const no = mk('Hayır', '#444');
+    const msg = document.createElement('div');
+    msg.style.cssText = 'margin-top:8px;font-size:12px';
+    yes.onclick = () => {
+        yes.disabled = true; msg.textContent = 'Kaydediliyor…';
+        const data = { name: ep.name, watchStatus: ep.currentEpisode };
+        if (score.value) data.score = Number(score.value);
+        chrome.runtime.sendMessage({ action: 'updateAnimeStatus', data }, (res) => {
+            if (res && res.success) { msg.textContent = `Bölüm ${ep.currentEpisode} kaydedildi ✓`; setTimeout(() => box.remove(), 2500); }
+            else { msg.textContent = (res && res.error) || 'Kaydedilemedi'; yes.disabled = false; }
+        });
+    };
+    no.onclick = () => box.remove();
+    row.append(score, yes, no);
+    box.append(title, row, msg);
+    document.body.appendChild(box);
+}
+
 function removeSyncerButtons() {
     document.querySelectorAll(".add-to-anisync-mal-btn, .add-to-anisync-detail-btn, .update-watch-status-btn").forEach(el => el.remove());
+    document.getElementById("kiroku-watch-prompt")?.remove();
 }
 
 function initSyncerButtons() {
@@ -762,6 +836,7 @@ function initSyncerButtons() {
     addMALWatchlistButton();
     addAniziumDetailWatchlistButton();
     addStreamingUpdateButton();
+    scheduleWatchPrompt();
 }
 
 // SPA Sayfa Değişiklikleri ve Dinamik Yüklemeler için MutationObserver
