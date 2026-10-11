@@ -306,6 +306,18 @@ anime.get("/anime-cover", async (c) => {
   return new Response(img, { headers: { ...headers, "Content-Type": contentType } });
 });
 
+// Giriş sayfasındaki kapak mozaiği için herkese açık: yalnızca en yüksek puanlı animelerin kapak adresleri
+anime.get("/anime-showcase", async (c) => {
+  const count = Math.min(Math.max(int(c.req.query("count")) || 24, 1), 48);
+  const { results } = await c.env.DB.prepare(
+    "SELECT id, cover FROM animes WHERE cover IS NOT NULL AND cover <> '' ORDER BY mal_score DESC, id ASC LIMIT ?"
+  )
+    .bind(count)
+    .all<{ id: number; cover: string }>();
+  c.header("Cache-Control", "public, max-age=3600");
+  return c.json(results.map((r) => (r.cover === INLINE_COVER || r.cover.startsWith("data:") ? coverUrl(c, r.id) : r.cover)));
+});
+
 anime.all("/get-genres", async (c) => {
   const { results } = await c.env.DB.prepare("SELECT id, genre_name FROM genres ORDER BY id").all<{
     id: number;

@@ -6,17 +6,19 @@ import { Box, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import StorageRoundedIcon from "@mui/icons-material/StorageRounded";
 import { palette } from "../../theme/customTheme";
-import { AnimeService } from "../../Services/AnimeServices";
+import axios from "axios";
+import { API_BASE } from "../../Services/http";
 
-// Sol panelde kayan kapak mozaiği: en yüksek puanlı animeler. Kapak uç noktası herkese açık;
-// liste alınamazsa yalnızca renkli arka plan kalır.
+// Sol panelde kayan kapak mozaiği: en yüksek puanlı animeler. Liste giriş istediği için mozaik
+// herkese açık /anime-showcase'ten beslenir; alınamazsa yalnızca renkli arka plan kalır.
 function useMosaicCovers(count: number) {
   const [covers, setCovers] = useState<string[]>([]);
   useEffect(() => {
     let alive = true;
-    AnimeService.getAnimes({ page: 1, count, orderBy: "Score", order: "desc", filters: [] })
-      .then((res: any) => {
-        const list: string[] = (res?.data ?? []).map((a: any) => a.Cover).filter((c: any) => typeof c === "string" && c);
+    axios
+      .get<string[]>(`${API_BASE}/anime-showcase`, { params: { count } })
+      .then((res) => {
+        const list = (Array.isArray(res.data) ? res.data : []).filter((c) => typeof c === "string" && c);
         if (alive) setCovers(list);
       })
       .catch(() => {});
