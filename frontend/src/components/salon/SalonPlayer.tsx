@@ -74,11 +74,25 @@ const clampNum = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo
 
 /** Cue text to safe HTML: only <i>, <b>, <u> survive */
 function cueHtml(text: string) {
+  const attr = (tag: string, name: string) => new RegExp(`${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag)?.slice(1).find(Boolean);
+  const fonts: string[] = [];
   return text
+    .replace(/<font\b[^>]*>/gi, (tag) => {
+      // face/color are kept (the face only shows if installed); size is an absolute ASS-style value, so it is ignored
+      const face = attr(tag, "face")?.trim();
+      const color = attr(tag, "color")?.trim();
+      const css = [face && /^[\w \-]{1,40}$/.test(face) ? `font-family:'${face}',system-ui,sans-serif` : "", color && /^#?[0-9a-z]{3,20}$/i.test(color) ? `color:${color.startsWith("#") || !/^[0-9a-f]{6}$/i.test(color) ? color : "#" + color}` : ""].filter(Boolean).join(";");
+      fonts.push(css);
+      return `\u0001${fonts.length - 1}\u0002`;
+    })
+    .replace(/<\/font>/gi, "\u0003")
+    .replace(/<(?!\/?[ibu]>)\/?[a-z][^>]*>/gi, "") // other tags (<c.x>, <v name> …): strip, keep text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/&lt;(\/?)([ibu])>/gi, "<$1$2>")
     .replace(/\{\\[^}]*\}/g, "")
+    .replace(/\u0001(\d+)\u0002/g, (_, i) => `<span style="${fonts[Number(i)].replace(/"/g, "")}">`)
+    .replace(/\u0003/g, "</span>")
     .replace(/\n/g, "<br/>");
 }
 
@@ -676,7 +690,10 @@ export default function SalonPlayer({
         onSeeking={() => setBusy(true)}
         onSeeked={() => setBusy(false)}
         onCanPlay={() => setBusy(false)}
-        onPlaying={() => setBusy(false)}
+        onPlaying={() => {
+          setBusy(false);
+          setError("");
+        }}
         onLoadedData={(e) => {
           setReady(true);
           // Kalınan yere ilk kare çözüldükten sonra git: metadata aşamasında sarmak bazı tarayıcılarda (özellikle HEVC/MKV) siyah ekran bırakıyor
@@ -725,7 +742,7 @@ export default function SalonPlayer({
       {subActive && activeCues.length ? (
         <div
           className={`sub-overlay${idle && !paused ? "" : " lifted"}`}
-          style={{ bottom: `${subStyle.bottom}%`, fontSize: `calc(${subStyle.size} * max(16px, 2.3cqw))`, color: subStyle.color }}
+          style={{ bottom: `${subStyle.bottom}%`, fontSize: `calc(${subStyle.size} * clamp(14px, min(2.3cqw, 3.4vh), 34px))`, color: subStyle.color }}
         >
           {activeCues.map((c, i) => (
             <span key={i} style={{ background: `rgba(0,0,0,${subStyle.bg})` }} dangerouslySetInnerHTML={{ __html: cueHtml(c) }} />
