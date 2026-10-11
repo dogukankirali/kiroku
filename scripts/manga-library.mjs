@@ -15,7 +15,7 @@
 //
 // --writable (yalnızca --key ile): kütüphaneye yazmaya da izin verir.
 //   PUT /<yol>                      → dosya yazar (eklentinin manga indirmesi NAS'a böyle gelir: .cbz, .json, .xml, görsel, altyazı)
-//   GET /__subs/providers           → altyazı kaynakları (podnapisi her zaman; opensubtitles için OPENSUBTITLES_API_KEY,
+//   GET /__subs/providers           → altyazı kaynakları (anisub için ANISUB_TOKEN; opensubtitles için OPENSUBTITLES_API_KEY,
 //                                     OPENSUBTITLES_USER, OPENSUBTITLES_PASS ortam değişkenleri)
 //   GET /__subs/search?q=&lang=&season=&episode=&provider=   → altyazı arar
 //   POST /__subs/save?provider=&id=&lang=&file=<video yolu>  → altyazıyı indirip videonun yanına "<ad>.<dil>.srt" olarak kaydeder
@@ -27,8 +27,8 @@
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep, extname } from "node:path";
 import { inflateRawSync } from "node:zlib";
 import { pipeline } from "node:stream/promises";
@@ -153,15 +153,35 @@ async function handlePut(req, res, path) {
 const UA = "Kiroku Library v1";
 const OPENSUBTITLES_URL = process.env.OPENSUBTITLES_URL ?? "https://api.opensubtitles.com/api/v1";
 const PODNAPISI_URL = process.env.PODNAPISI_URL ?? "https://www.podnapisi.net";
+const ANISUB_URL = process.env.ANISUB_URL ?? "https://anisub.co";
+const anisubToken = process.env.ANISUB_TOKEN ?? "";
 const osKey = process.env.OPENSUBTITLES_API_KEY ?? "";
 const osUser = process.env.OPENSUBTITLES_USER ?? "";
 const osPass = process.env.OPENSUBTITLES_PASS ?? "";
 let osToken = { value: "", at: 0 };
 
-const subProviders = () => ["podnapisi", ...(osKey && osUser && osPass ? ["opensubtitles"] : [])];
+const hasOpenSubtitles = () => Boolean(osKey && osUser && osPass);
+// AniSub (Turkish first, token needed) and OpenSubtitles when configured; Podnapisi only when asked for (PODNAPISI=1) or when nothing else is set up
+const subProviders = () => [
+  ...(anisubToken ? ["anisub"] : []),
+  ...(hasOpenSubtitles() ? ["opensubtitles"] : []),
+  ...(process.env.PODNAPISI === "1" || (!anisubToken && !hasOpenSubtitles()) ? ["podnapisi"] : []),
+];
+
+const LANG_NAMES = { tr: "türkçe", en: "ingilizce", ja: "japonca", de: "almanca", fr: "fransızca", es: "ispanyolca", it: "italyanca", pt: "portekizce", ru: "rusça", ar: "arapça" };
+
+/** fetch'in "fetch failed" gibi anlamsız mesajı yerine asıl nedeni (DNS, TLS, zaman aşımı…) gösterir */
+async function fetchDetailed(url, init) {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    const cause = err?.cause?.code ?? err?.cause?.message ?? err?.name ?? "";
+    throw new Error(`${new URL(String(url)).hostname} bağlantı hatası${cause ? ` (${cause})` : ""}`);
+  }
+}
 
 async function getJson(url, init = {}) {
-  const res = await fetch(url, { ...init, headers: { "User-Agent": UA, Accept: "application/json", ...(init.headers ?? {}) }, signal: AbortSignal.timeout(20000) });
+  const res = await fetchDetailed(url, { ...init, headers: { "User-Agent": UA, Accept: "application/json", ...(init.headers ?? {}) }, signal: AbortSignal.timeout(20000) });
   if (!res.ok) throw new Error(`${new URL(url).hostname} ${res.status}`);
   return res.json();
 }
@@ -179,6 +199,23 @@ async function openSubtitlesToken() {
 
 /** Sonuç biçimi: { id, name, lang, downloads, provider } */
 async function searchSubtitles({ provider, q, lang, season, episode }) {
+  if (provider === "anisub") {
+    const url = new URL(`${ANISUB_URL}/api/subtitles`);
+    url.searchParams.set("q", q);
+    url.searchParams.set("per_page", "50");
+    url.searchParams.set("sort", "downloads");
+    const data = await getJson(url);
+    const wanted = LANG_NAMES[lang];
+    const epNum = Number(episode) || 0;
+    const rows = (data.data ?? [])
+      .filter((a) => !wanted || String(a.subtitle_language ?? "").toLocaleLowerCase("tr") === wanted)
+      .map((a) => {
+        const n = Number(/(\d+)/.exec(a.content_type ?? "")?.[1] ?? 0);
+        return { rank: epNum && n === epNum ? 0 : 1, hit: { id: String(a.subtitle_id), name: [a.subtitle_release_name, a.content_type, a.format, a.is_ai_translated ? "AI çeviri" : ""].filter(Boolean).join(" · "), lang, downloads: a.downloads_count ?? 0, provider } };
+      });
+    // Exact episode matches first; the server's download order is kept inside each group
+    return rows.sort((x, y) => x.rank - y.rank).map((r) => r.hit);
+  }
   if (provider === "opensubtitles") {
     const url = new URL(`${OPENSUBTITLES_URL}/subtitles`);
     url.searchParams.set("query", q);
@@ -206,7 +243,19 @@ async function searchSubtitles({ provider, q, lang, season, episode }) {
   });
 }
 
-async function downloadSubtitle({ provider, id }) {
+async function downloadSubtitle({ provider, id, episode }) {
+  if (provider === "anisub") {
+    const ep = Number(episode) > 0 ? `?episode=${Number(episode)}` : "";
+    const endpoint = `${ANISUB_URL}/api/integrations/subtitles/${encodeURIComponent(id)}/download`;
+    const auth = { headers: { Authorization: `Bearer ${anisubToken}` } };
+    // ?episode= only applies to ZIP packs; if the API rejects it for a single file, ask again without it
+    const info = await getJson(endpoint + ep, auth).catch((err) => (ep ? getJson(endpoint, auth) : Promise.reject(err)));
+    const link = info.data?.download_url;
+    if (!link) throw new Error("anisub indirme adresi vermedi");
+    const res = await fetchDetailed(link, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(30000) });
+    if (!res.ok) throw new Error(`anisub dosya ${res.status}`);
+    return { bytes: Buffer.from(await res.arrayBuffer()), name: info.data.filename ?? "" };
+  }
   if (provider === "opensubtitles") {
     const token = await openSubtitlesToken();
     const info = await getJson(`${OPENSUBTITLES_URL}/download`, {
@@ -214,11 +263,11 @@ async function downloadSubtitle({ provider, id }) {
       headers: { "Api-Key": osKey, Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ file_id: Number(id) }),
     });
-    const res = await fetch(info.link, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(30000) });
+    const res = await fetchDetailed(info.link, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(30000) });
     if (!res.ok) throw new Error(`opensubtitles dosya ${res.status}`);
     return { bytes: Buffer.from(await res.arrayBuffer()), name: info.file_name ?? "" };
   }
-  const res = await fetch(`${PODNAPISI_URL}/subtitles/${encodeURIComponent(id)}/download?container=zip`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(30000) });
+  const res = await fetchDetailed(`${PODNAPISI_URL}/subtitles/${encodeURIComponent(id)}/download?container=zip`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(30000) });
   if (!res.ok) throw new Error(`podnapisi dosya ${res.status}`);
   return { bytes: Buffer.from(await res.arrayBuffer()), name: "" };
 }
@@ -261,12 +310,30 @@ function toUtf8(bytes, lang) {
   }
 }
 
-async function saveSubtitle({ provider, id, lang, file }) {
+/** İlk altyazı dosyasını RAR paketinden çıkarır (imajda unrar varsa) */
+async function firstSubtitleInRar(bytes) {
+  const dir = await mkdtemp(join(tmpdir(), "kiroku-rar-"));
+  try {
+    const archive = join(dir, "a.rar");
+    await writeFile(archive, bytes);
+    const list = spawnSync("unrar", ["lb", archive], { encoding: "utf8" });
+    if (list.error) throw new Error("RAR paketi için sunucuda unrar gerekli (imajı güncel Dockerfile ile yeniden derle)");
+    const name = list.stdout.split("\n").map((l) => l.trim()).find((l) => /\.(srt|ass|ssa|vtt)$/i.test(l));
+    if (!name) return null;
+    const out = spawnSync("unrar", ["p", "-inul", archive, name], { maxBuffer: 20 * 1024 * 1024 });
+    return out.status === 0 && out.stdout.length ? { name, bytes: out.stdout } : null;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+async function saveSubtitle({ provider, id, lang, file, episode }) {
   const video = inRoot(file);
   if (!video || !/\.(mp4|m4v|webm|mkv|mov|ogv)$/i.test(video)) throw new Error("geçersiz video yolu");
   await stat(video);
-  const got = await downloadSubtitle({ provider, id });
-  const entry = got.bytes[0] === 0x50 && got.bytes[1] === 0x4b ? firstSubtitleInZip(got.bytes) : { name: got.name, bytes: got.bytes };
+  const got = await downloadSubtitle({ provider, id, episode });
+  const isRar = got.bytes.subarray(0, 4).toString("latin1") === "Rar!";
+  const entry = got.bytes[0] === 0x50 && got.bytes[1] === 0x4b ? firstSubtitleInZip(got.bytes) : isRar ? await firstSubtitleInRar(got.bytes) : { name: got.name, bytes: got.bytes };
   if (!entry?.bytes) throw new Error("indirilen dosyada altyazı bulunamadı");
   let ext = extname(entry.name).toLowerCase();
   ext = [".srt", ".ass", ".ssa", ".vtt"].includes(ext) ? ext : ".srt";
@@ -297,7 +364,7 @@ async function handleSubs(req, res, url, path) {
     }
     if (path === "/__subs/save" && req.method === "POST") {
       if (!writable) return json(403, { error: "sunucu --writable ile başlatılmadı" });
-      return json(200, { saved: await saveSubtitle({ provider, id: q.get("id") ?? "", lang, file: q.get("file") ?? "" }) });
+      return json(200, { saved: await saveSubtitle({ provider, id: q.get("id") ?? "", lang, file: q.get("file") ?? "", episode: q.get("episode") ?? "" }) });
     }
     return json(404, { error: "bilinmeyen yol" });
   } catch (err) {
@@ -372,11 +439,21 @@ createServer(async (req, res) => {
            ...(q.has("compat") ? ["-vf", `scale=-2:'min(${Math.min(2160, Math.max(240, Math.round(Number(q.get("compat"))) || 720))},ih)',format=yuv420p`, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-g", "48", "-sc_threshold", "0"] : ["-c:v", "copy"]),
            "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-sn",
            "-avoid_negative_ts", "make_zero", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"],
-          { stdio: ["ignore", "pipe", "ignore"] }
+          { stdio: ["ignore", "pipe", "pipe"] }
         );
+        // ffmpeg hata verirse docker logs'ta görünsün (tarayıcıdan kapanma = bizim SIGKILL'imiz, hata sayılmaz)
+        let errTail = "";
+        let closedByClient = false;
+        proc.stderr.on("data", (d) => (errTail = (errTail + d).slice(-1500)));
+        proc.on("close", (code) => {
+          if (code && !closedByClient) console.error(`ffmpeg çıkış ${code} (${path}, ses ${a}, başlangıç ${start}${q.has("compat") ? ", uyumlu mod" : ""}):\n${errTail}`);
+        });
         res.writeHead(200, { ...cors, "Content-Type": "video/mp4", "Cache-Control": "no-store" });
         proc.stdout.pipe(res);
-        const stop = () => proc.kill("SIGKILL");
+        const stop = () => {
+          closedByClient = true;
+          proc.kill("SIGKILL");
+        };
         res.on("close", stop);
         proc.on("error", () => res.destroy());
         return;

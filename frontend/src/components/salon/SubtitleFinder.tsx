@@ -18,7 +18,7 @@ const LANGS = [
   { code: "pt", label: "Portekizce" },
   { code: "ru", label: "Rusça" },
 ];
-const PROVIDER_LABEL: Record<string, string> = { podnapisi: "Podnapisi (anahtarsız)", opensubtitles: "OpenSubtitles" };
+const PROVIDER_LABEL: Record<string, string> = { anisub: "AniSub (Türkçe öncelikli)", podnapisi: "Podnapisi (anahtarsız)", opensubtitles: "OpenSubtitles" };
 
 type Props = {
   open: boolean;
@@ -65,7 +65,7 @@ export default function SubtitleFinder({ open, onClose, info, file, names, episo
     setBusy(hit.id);
     setError("");
     try {
-      const saved = await saveSubtitleFile({ provider: hit.provider, id: hit.id, lang, file });
+      const saved = await saveSubtitleFile({ provider: hit.provider, id: hit.id, lang, file, episode: ep.trim() });
       onSaved(saved);
     } catch (e) {
       setError((e as Error).message);
