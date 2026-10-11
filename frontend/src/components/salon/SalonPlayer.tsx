@@ -15,7 +15,7 @@ type Props = {
   src: string;
   subtitle?: string | null;
   tracks?: MediaTracks | null;
-  audioUrl?: (audioIndex: number, start: number) => string;
+  audioUrl?: (audioIndex: number, start: number, compat: boolean) => string;
   snapStart?: (t: number) => Promise<number>;
   loadSubtitle?: (subIndex: number) => Promise<string>;
   /** Verilirse ayar menüsünde "Altyazı bul…" çıkar */
@@ -60,7 +60,7 @@ function trackLabel(t: MediaTrack) {
 }
 
 type SubSel = { kind: "off" } | { kind: "external" } | { kind: "embedded"; index: number };
-type Prefs = { volume?: number; captions?: boolean; audioLang?: string; subLang?: string };
+type Prefs = { volume?: number; captions?: boolean; audioLang?: string; subLang?: string; compat?: boolean };
 
 function readPrefs(): Prefs {
   try {
@@ -74,8 +74,10 @@ const nativeAudio = (tracks?: MediaTracks | null) => tracks?.audio.find((a) => a
 
 function initialAudio(tracks: MediaTracks | null | undefined, prefs: Prefs): number | null {
   const native = nativeAudio(tracks);
-  if (!tracks || !native || !prefs.audioLang) return null;
-  const wanted = tracks.audio.find((a) => a.lang === prefs.audioLang);
+  if (!tracks || !native) return null;
+  const wanted = prefs.audioLang ? tracks.audio.find((a) => a.lang === prefs.audioLang) : undefined;
+  // Compatibility mode always streams (transcoded), even for the browser's own audio track
+  if (prefs.compat) return (wanted ?? native).index;
   return wanted && wanted.index !== native.index ? wanted.index : null;
 }
 function initialSub(tracks: MediaTracks | null | undefined, hasExternal: boolean, prefs: Prefs): SubSel {
@@ -160,6 +162,7 @@ export default function SalonPlayer({
   const [base, setBase] = useState<number | null>(() => (initialAudio(tracks, readPrefs()) === null ? 0 : null));
   const [subSel, setSubSel] = useState<SubSel>(() => initialSub(tracks, Boolean(subtitle), readPrefs()));
   const [subUrl, setSubUrl] = useState<string | null>(null);
+  const [compat, setCompat] = useState<boolean>(() => Boolean(readPrefs().compat));
   const audioRef = useRef(audio);
   const baseRef = useRef(base);
   audioRef.current = audio;
@@ -369,7 +372,7 @@ export default function SalonPlayer({
     const v = video();
     keepPaused.current = v?.paused ?? false;
     const token = ++switchToken.current;
-    if (!native || index === native.index) {
+    if (!native || (index === native.index && !compat)) {
       if (audioRef.current === null) return;
       resumeAt.current = t;
       setAudio(null);
@@ -385,6 +388,32 @@ export default function SalonPlayer({
       setBase(b);
       setTime(b);
     });
+  };
+
+  // Compatibility mode: the server transcodes the video to 8-bit H.264 (for codecs the browser cannot decode, e.g. HEVC 10-bit in Firefox)
+  const toggleCompat = () => {
+    const next = !compat;
+    const native = nativeAudio(tracks);
+    savePrefs({ compat: next });
+    setCompat(next);
+    setMenu(false);
+    if (!native) return;
+    const t = clock();
+    keepPaused.current = video()?.paused ?? false;
+    const token = ++switchToken.current;
+    setBusy(true);
+    if (next) {
+      setAudio(audioRef.current ?? native.index);
+      (snapStart ? snapStart(t) : Promise.resolve(t)).then((b) => {
+        if (token !== switchToken.current) return;
+        setBase(b);
+        setTime(b);
+      });
+    } else if (audioRef.current === native.index) {
+      resumeAt.current = t;
+      setAudio(null);
+      setBase(0);
+    }
   };
 
   const chooseSub = (sel: SubSel) => {
@@ -537,7 +566,7 @@ export default function SalonPlayer({
   const cls = ["kk-salon", paused && "paused", theater && "theater", fullScreen && "full-screen", pip && "mini-player", subActive && "captions", scrubbing && "scrubbing", idle && "idle", ready && "ready", busy && "busy"]
     .filter(Boolean)
     .join(" ");
-  const videoSrc = audio === null ? src : base === null ? undefined : (audioUrl?.(audio, base) ?? src);
+  const videoSrc = audio === null ? src : base === null ? undefined : (audioUrl?.(audio, base, compat) ?? src);
   const nativeTrack = nativeAudio(tracks);
   const activeAudio = audio ?? nativeTrack?.index;
 
@@ -630,6 +659,15 @@ export default function SalonPlayer({
                 </button>
               ))}
               {audio !== null ? <div className="settings-note">Bu ses için video yeniden akıtılıyor; sarma birkaç saniye geriden başlayabilir.</div> : null}
+            </div>
+          ) : null}
+          {tracks ? (
+            <div className="settings-group">
+              <div className="settings-title">Görüntü</div>
+              <button className={compat ? "active" : ""} onClick={toggleCompat}>
+                Uyumlu mod (H.264'e çevir)
+              </button>
+              <div className="settings-note">Siyah ekran ama ses varsa aç. Sunucu videoyu 720p'ye çevirir.</div>
             </div>
           ) : null}
           <div className="settings-group">

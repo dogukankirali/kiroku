@@ -59,6 +59,51 @@ function log(message, kind = "") {
 }
 const setProgress = (ratio) => ($("progress").firstElementChild.style.width = `${Math.round(Math.min(1, Math.max(0, ratio)) * 100)}%`);
 
+// ------------------------------ Site izinleri (Firefox) ------------------------------
+// Firefox MV3'te host_permissions kurulumda otomatik verilmez; kullanıcı onayı bir tıklamayla istenmelidir.
+
+const manifestHosts = () => chrome.runtime.getManifest().host_permissions ?? [];
+const permissionsApi = () => (chrome.permissions && chrome.permissions.contains ? chrome.permissions : null);
+
+async function hasHosts(origins) {
+  try {
+    return await permissionsApi().contains({ origins });
+  } catch {
+    return true; // API yoksa (Chrome) izin zaten kurulumda verilmiştir
+  }
+}
+
+async function requestHosts(origins) {
+  try {
+    return await permissionsApi().request({ origins });
+  } catch {
+    return false;
+  }
+}
+
+async function initPermissions() {
+  if (!permissionsApi()) return;
+  const hosts = manifestHosts();
+  if (hosts.length && !(await hasHosts(hosts))) {
+    $("perm-banner").hidden = false;
+    $("perm-grant").addEventListener("click", async () => {
+      if (await requestHosts(hosts)) $("perm-banner").hidden = true;
+    });
+  }
+}
+
+/** NAS adresinin sitesi için izin (manifest'teki *.ts.net dışındaki adresler için de) */
+async function ensureNasPermission(url) {
+  if (!permissionsApi()) return true;
+  let origin;
+  try {
+    origin = `${new URL(url).origin}/*`;
+  } catch {
+    return false;
+  }
+  return (await hasHosts([origin])) || requestHosts([origin]);
+}
+
 // ------------------------------ Kayıt yeri ------------------------------
 
 let storageSettings = { ...DEFAULT_STORAGE };
@@ -92,7 +137,8 @@ async function initStorage() {
   $("st-target").addEventListener("change", showTarget);
   $("st-test").addEventListener("click", async () => {
     setStatus("Deneniyor…");
-    try { await testNas(readStorageForm()); setStatus("NAS'a yazılabiliyor", "ok"); } catch (e) { setStatus(e.message, "err"); }
+    try {
+      if (!(await ensureNasPermission($("st-nasUrl").value.trim()))) throw new Error("Bu adrese erişim izni verilmedi"); await testNas(readStorageForm()); setStatus("NAS'a yazılabiliyor", "ok"); } catch (e) { setStatus(e.message, "err"); }
   });
   document.body.dataset.theme = data.theme ?? "dark";
   $("st-localDir").value = storageSettings.localDir;
@@ -104,6 +150,7 @@ async function initStorage() {
 
   $("st-save").addEventListener("click", async () => {
     storageSettings = readStorageForm();
+    if (storageSettings.target === "nas" && !(await ensureNasPermission(storageSettings.nasUrl))) return setStatus("Bu adrese erişim izni verilmedi", "err");
     // Eski sürümün sunucu ayarları (WebDAV) varsa silinir; artık hiçbir sunucuya bağlanılmıyor
     await store.set({ [STORAGE_KEY]: storageSettings });
     setStatus(`Kaydedildi: ${createStorage(storageSettings).label}`, "ok");
@@ -332,6 +379,7 @@ async function autoUpdate(params) {
 // ------------------------------ Başlat ------------------------------
 
 renderSourceToggles();
+initPermissions();
 const initDone = initStorage();
 $("search").addEventListener("click", search);
 $("q").addEventListener("keydown", (e) => e.key === "Enter" && search());
