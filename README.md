@@ -9,6 +9,7 @@
 
 - **Anime archive**: grid and table views, infinite scroll, name search (`Ctrl K`), genre/format/status/score/episode/series filters, column sorting and editing.
 - **Watchlist**: every anime marked "Plan to Watch" lands on the list automatically. Whether it comes from the web UI, the extension or a sync, a DB trigger keeps the list up to date. Drag-and-drop ordering.
+- **Waitlist** (`/waitlist`): anime that haven't aired yet, added from AniList's upcoming list. They stay in the archive and table but not in the watchlist; airing notifications also go to waitlisted anime.
 - **Profile**: stats (archive, completed, average score), top 10 rated anime, profile and password editing. Personalized recommendations are on the way ([#39](https://github.com/dogukankirali/local-db-app/issues/39)).
 - **Accounts**: sign-up/sign-in with JWT, password reset by email (single-use link, valid for 1 hour).
 - **AniList sync**: fills in missing details, scores and series relations of archived anime in bulk.
@@ -107,6 +108,15 @@ The extension's **Manga İndirici** page (popup → Ayarlar → 📚 Manga İndi
 
 Serving the library from a home server (Caddy + Cloudflare Tunnel): [docs/manga-library-server.md](docs/manga-library-server.md).
 
+## Salon (anime player)
+
+**Salon** (`/salon?id=<anime>`) plays episodes from your own video library; Kiroku only stores progress. The library has one folder per anime with its episode files (MP4/H.264 or WebM play everywhere; MKV depends on the browser) and optional subtitles with the same base name (`.vtt` or `.srt`, converted in the browser).
+
+- **Opening**: the anime detail page shows **Salon'da izle** when a library folder matches the anime's name. If the names differ, pick the folder once; the choice is remembered in that browser.
+- **Library**: a file server (`node scripts/manga-library.mjs "D:/Anime" --port 8789 --key <key>` locally, or Caddy on a home server) or a folder picked on this computer (Chrome/Edge). The server supports range requests so videos can be seeked. `<video>` cannot send a password header, so the server takes an optional `?key=` access key instead; it is stored only in the browser.
+- **Player**: ported from the [project-v](https://github.com/dogukankirali/project-v) prototype. Timeline scrubbing, speed, subtitles, mini player, theater mode, full screen and shortcuts (space/k, f, t, i, m, c, ←/→, j/l, ↑/↓, 0–9, n/p).
+- **Progress**: watching 90% of an episode raises the anime's watched episode count. The position within each episode is kept per browser for resuming, and the next episode starts when one ends.
+
 ## Per-user list
 
 The anime catalog (name, status, episode count, cover, genres, MAL score) is shared by everyone and only the admin changes it. Score, watched episodes, Plan to Watch, notes, watch dates and the watchlist are separate for each user (`user_anime`, `watch_lists.user_id`). Lists require sign-in; since the site bypasses Cloudflare Access for `/api`, the API is closed to anonymous reads.
@@ -170,6 +180,7 @@ No license has been specified for this project yet.
 
 - **Anime arşivi**: Kart (grid) ve tablo görünümü, sonsuz kaydırma, isim araması (`Ctrl K`), tür/format/durum/puan/bölüm/seri filtreleri, sütun sıralama ve düzenleme.
 - **Watchlist**: "Plan to Watch" işaretli her anime otomatik olarak listeye girer. Web arayüzü, eklenti ya da senkronizasyon fark etmez; DB trigger'ı listeyi her zaman güncel tutar. Sürükle-bırak ile sıralama.
+- **Waitlist** (`/waitlist`): henüz yayınlanmamış animeler, AniList'in yakında çıkacaklar listesinden eklenir. Arşivde ve tabloda görünür ama watchlist'te görünmez; yayın bildirimleri waitlist'tekilere de gider.
 - **Profil**: İstatistikler (arşiv, tamamlanan, ortalama puan), en yüksek puanlı 10 anime, profil ve şifre düzenleme. Kişiye özel öneriler yolda ([#39](https://github.com/dogukankirali/local-db-app/issues/39)).
 - **Hesaplar**: JWT ile kayıt/giriş, e-posta ile şifre sıfırlama (tek kullanımlık, 1 saat geçerli bağlantı).
 - **AniList senkronizasyonu**: Arşivdeki animelerin eksik bilgilerini, puanlarını ve seri ilişkilerini toplu doldurur.
@@ -267,6 +278,15 @@ Eklentinin **Manga İndirici** sayfası (popup → Ayarlar → 📚 Manga İndir
 - **Kayıt yeri**: doğrudan bu bilgisayara, `İndirilenler/Kiroku/Manga/<Seri>/` (klasör değiştirilebilir). Hiçbir yere yüklenmez, başka yerde kopyası tutulmaz; dosyaları sunucuya taşımak kullanıcıya kalır.
 
 Kütüphaneyi ev sunucusundan sunmak (Caddy + Cloudflare Tunnel): [docs/manga-library-server.md](docs/manga-library-server.md).
+
+## Salon (anime oynatıcı)
+
+**Salon** (`/salon?id=<anime>`) bölümleri kendi video kütüphanenden oynatır; Kiroku yalnızca ilerlemeyi tutar. Kütüphanede her anime için bir klasör ve içinde bölüm dosyaları olur (MP4/H.264 ya da WebM her yerde açılır; MKV tarayıcıya bağlı). İsteğe bağlı olarak aynı adlı altyazılar (`.vtt` ya da tarayıcıda dönüştürülen `.srt`) eklenebilir.
+
+- **Açılış**: kütüphanede animenin adıyla eşleşen bir klasör varsa anime detay sayfasında **Salon'da izle** çıkar. Adlar farklıysa klasör bir kez seçilir; seçim o tarayıcıda hatırlanır.
+- **Kütüphane**: bir dosya sunucusu (yerelde `node scripts/manga-library.mjs "D:/Anime" --port 8789 --key <anahtar>`, ev sunucusunda Caddy) ya da bu bilgisayarda seçilen bir klasör (Chrome/Edge). Sunucu aralıklı istekleri (Range) desteklediği için video ileri geri sarılabilir. `<video>` şifre başlığı gönderemediği için sunucu bunun yerine isteğe bağlı bir `?key=` erişim anahtarı alır; anahtar yalnızca tarayıcıda saklanır.
+- **Oynatıcı**: [project-v](https://github.com/dogukankirali/project-v) prototipinden taşındı. Zaman çizgisinde sürükleme, hız, altyazı, mini oynatıcı, sinema modu, tam ekran ve kısayollar (boşluk/k, f, t, i, m, c, ←/→, j/l, ↑/↓, 0–9, n/p).
+- **İlerleme**: bir bölümün %90'ı izlenince animenin izlenen bölüm sayısı artar. Her bölümde kalınan yer devam etmek için tarayıcıda saklanır; bölüm bitince sıradaki başlar.
 
 ## Kullanıcıya özel liste
 

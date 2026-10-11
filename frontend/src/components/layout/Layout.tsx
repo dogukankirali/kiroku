@@ -10,7 +10,7 @@ import ProtectedRoute from "../auth/ProtectedRoute";
 
 const COLLAPSED_KEY = "sidebarCollapsed";
 const AUTH_ROUTES = ["/login", "/register", "/forgot-password", "/reset-password"];
-const PREWARM_ROUTES = ["/", "/anime", "/watchlist", "/readlist", "/profile", "/manga", "/book", "/series", "/movies"];
+const PREWARM_ROUTES = ["/", "/anime", "/watchlist", "/readlist", "/profile", "/manga", "/book", "/series", "/movies", "/waitlist"];
 
 // Masaüstünde sabit (daraltılabilir) sidebar, md altında açılır menü (drawer).
 // Boyutlar JS yerine CSS breakpoint'leri ile yönetilir; ilk render'da kayma olmaz.

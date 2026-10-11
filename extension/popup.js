@@ -59,7 +59,80 @@ chrome.storage.local.get(null, (data) => {
 
     // Syncer durumlarını da başlat
     initSyncerUI(data);
+
+    // Açık sekme bir izleme sayfasıysa izlenen animeyi kendiliğinden bul (takip sürerken dokunma)
+    if (!data.trackingActive) detectAnimeFromActiveTab(data.anime);
 });
+
+// İzleme sitesindeki oynatıcı sayfasından anime adını çıkarır: önce sayfanın başlığı (içerik betiği),
+// olmazsa adresteki kısa ad ("sousou-no-frieren-3-bolum-izle" → "sousou no frieren")
+function titleFromUrl(url) {
+    try {
+        const u = new URL(url);
+        const parts = u.pathname.split('/').filter(Boolean).filter((p) => !/^(anime|watch|izle|video|episode|bolum|tr|en)$/i.test(p) && !/^\d+$/.test(p));
+        const slug = parts.sort((a, b) => b.length - a.length)[0] || '';
+        return slug
+            .replace(/\.(html?|php)$/i, '')
+            .replace(/[-_](\d+)[-_]?(bolum|bölüm|episode|ep)\b.*$/i, '')
+            .replace(/[-_](bolum|bölüm|episode|ep)[-_]?\d+.*$/i, '')
+            .replace(/[-_](izle|watch|turkce|altyazili)\b.*$/i, '')
+            .replace(/[-_]+/g, ' ')
+            .trim();
+    } catch (e) {
+        return '';
+    }
+}
+
+const STREAMING_HOSTS = ['turkanime.co', 'tranimeizle.top', 'tranimeizle.co', 'anizium.co', 'anizium.com'];
+
+async function detectAnimeFromActiveTab(currentAnime) {
+    try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab || !tab.url || !STREAMING_HOSTS.some((h) => new URL(tab.url).hostname.endsWith(h))) return;
+        const fromPage = await new Promise((resolve) => {
+            chrome.tabs.sendMessage(tab.id, { action: 'getEpisodeInfo' }, (res) => {
+                resolve(!chrome.runtime.lastError && res && res.episodeInfo ? res.episodeInfo.name : '');
+            });
+        });
+        const name = (fromPage || titleFromUrl(tab.url)).trim();
+        if (name.length < 3) return;
+        const media = await searchAniListOne(name);
+        if (!media) return;
+        const title = media.title.english || media.title.romaji;
+        // Seçili anime zaten buysa bir şey yapma
+        if (currentAnime && currentAnime.id === media.id) return;
+        const animeData = { id: media.id, title, image: media.coverImage.extraLarge || media.coverImage.large || '', episodes: media.episodes || 12, genres: (media.genres || []).slice(0, 3).join(', ') };
+        prepareNewAnime(animeData);
+        showDetectedBanner(title);
+    } catch (e) {
+        // Algılanamazsa elle arama her zamanki gibi çalışır
+    }
+}
+
+async function searchAniListOne(search) {
+    const res = await fetch('https://graphql.anilist.co', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+            query: `query ($search: String) { Page(perPage: 1) { media(search: $search, type: ANIME) { id title { romaji english } episodes coverImage { extraLarge large } genres } } }`,
+            variables: { search },
+        }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()).data?.Page?.media?.[0] || null;
+}
+
+function showDetectedBanner(title) {
+    let el = document.getElementById('detected-banner');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'detected-banner';
+        el.className = 'syncer-status';
+        el.style.cssText = 'display:block; margin-bottom:8px; font-size:12px;';
+        ui.animeCard.parentNode.insertBefore(el, ui.animeCard);
+    }
+    el.textContent = `🎯 Açık sekmeden algılandı: ${title}. Yanlışsa yukarıdan ara.`;
+}
 
 ui.themeBtn.addEventListener('click', () => {
     const isDark = document.body.getAttribute('data-theme') === 'dark';
@@ -772,3 +845,105 @@ async function handleUpdateFromStreaming(tabId) {
 document.getElementById('open-manga-downloader').addEventListener('click', () => {
     chrome.tabs.create({ url: chrome.runtime.getURL('manga-downloader.html') });
 });
+
+// ============================================================
+// Tablodaki puanlanmış animeleri Kiroku'ya aktar
+// AniList'ten romaji ad, MAL bağlantısı, bölüm sayısı, türler ve kapak alınır; Kiroku'nun ad eşleştirmesi
+// romaji adla çalıştığı için katalogdaki kayıtla buluşur. Puan 10'luktan Kiroku'nun 100'lük ölçeğine çevrilir.
+// ============================================================
+
+async function importRatedToKiroku() {
+    const statusEl = document.getElementById('import-rated-status');
+    const btn = document.getElementById('btn-import-rated');
+    const show = (text, isError = false) => {
+        statusEl.style.display = 'block';
+        statusEl.textContent = text;
+        statusEl.style.color = isError ? 'var(--danger)' : 'var(--text)';
+    };
+    const serviceUrl = (await getServiceUrl()).trim().replace(/\/+$/, '');
+    if (!serviceUrl) return show('Önce Ayarlar sekmesinden Service URL gir.', true);
+    const auth = await getAuthHeader();
+    if (!auth.Authorization) return show('Önce Ayarlar sekmesinden Kiroku hesabına giriş yap.', true);
+
+    // Aynı AniList kaydının sezonları tek satır: en yüksek puan ve bitirildi bilgisi korunur
+    const byId = new Map();
+    for (const [key, entry] of Object.entries(animeHistory)) {
+        const score = parseFloat(entry.score);
+        if (!(score > 0)) continue;
+        const id = parseInt(String(key).split('_')[0]);
+        if (!id) continue;
+        const prev = byId.get(id);
+        if (!prev || score > prev.score) byId.set(id, { score, completed: entry.status === 'completed' || (prev && prev.completed) });
+    }
+    if (!byId.size) return show('Tabloda puanlanmış anime yok.');
+
+    btn.disabled = true;
+    try {
+        show(`${byId.size} anime için AniList bilgisi alınıyor…`);
+        const ids = [...byId.keys()];
+        const media = [];
+        for (let i = 0; i < ids.length; i += 50) {
+            const res = await fetch('https://graphql.anilist.co', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({
+                    query: `query ($ids: [Int]) { Page(perPage: 50) { media(id_in: $ids, type: ANIME) { id idMal title { romaji english } episodes format status genres coverImage { extraLarge large } } } }`,
+                    variables: { ids: ids.slice(i, i + 50) },
+                }),
+            });
+            if (!res.ok) throw new Error(`AniList ${res.status}`);
+            media.push(...((await res.json()).data?.Page?.media || []));
+        }
+
+        const statusMap = { FINISHED: 'Finished', RELEASING: 'Currently Airing', NOT_YET_RELEASED: 'Not yet aired', CANCELLED: 'Finished', HIATUS: 'Currently Airing' };
+        let done = 0, failed = 0;
+        for (const m of media) {
+            const own = byId.get(m.id);
+            try {
+                await safeFetchJson(`${serviceUrl}/api/create-anime`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...auth },
+                    body: JSON.stringify({
+                        Name: m.title.romaji || m.title.english,
+                        EnglishName: m.title.english || '',
+                        AnimeStatus: statusMap[m.status] || 'Unknown',
+                        TotalNumberOfEpisodes: m.episodes || 0,
+                        IsMovie: m.format === 'MOVIE',
+                        Genre: (m.genres || []).join(', '),
+                        Cover: m.coverImage?.extraLarge || m.coverImage?.large || '',
+                        MALAnimeLink: m.idMal ? `https://myanimelist.net/anime/${m.idMal}` : '',
+                        Score: Math.round(own.score * 10),
+                        // Bitirildiyse tüm bölümler izlenmiş sayılır
+                        WatchStatus: own.completed && m.episodes ? m.episodes : 0,
+                    }),
+                });
+                done++;
+            } catch (e) {
+                failed++;
+            }
+            show(`Aktarılıyor… ${done + failed}/${media.length}`);
+        }
+        show(`Bitti: ${done} anime Kiroku'ya aktarıldı${failed ? `, ${failed} anime aktarılamadı` : ''}.`, failed > 0 && done === 0);
+    } catch (e) {
+        show(`Aktarılamadı: ${e.message}`, true);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+document.getElementById('btn-import-rated').addEventListener('click', importRatedToKiroku);
+
+// Dijital manga okuma siteleri (manga-reading.js bu listedeki sitelerde çalışır)
+const DEFAULT_MANGA_SITES = ['ravenscans.org', 'ravenscans.com', 'mangadex.org', 'mgeko.cc', 'mangaplus.shueisha.co.jp'];
+chrome.storage.local.get('manga_sites', (s) => {
+    const sites = Array.isArray(s.manga_sites) && s.manga_sites.length ? s.manga_sites : DEFAULT_MANGA_SITES;
+    document.getElementById('manga-sites').value = sites.join('\n');
+});
+document.getElementById('manga-sites-save').addEventListener('click', () => {
+    const sites = document.getElementById('manga-sites').value
+        .split(/\s+/)
+        .map((s) => s.trim().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '').toLowerCase())
+        .filter(Boolean);
+    chrome.storage.local.set({ manga_sites: [...new Set(sites)] }, () => showSyncerStatus('Manga siteleri kaydedildi. Açık sekmeleri yenile.'));
+});
+

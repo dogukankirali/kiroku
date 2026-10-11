@@ -401,3 +401,37 @@ function authHeader(token) {
     return token ? { Authorization: `Bearer ${token}` } : {};
 }
 const LOGIN_REQUIRED = "Kiroku hesabına giriş yapılmamış ya da anahtar iptal edilmiş. Eklentide Configs sekmesinden giriş yap.";
+
+// ============================================================
+// Dijital manga okuma: okuma sitelerindeki içerik betiği son okunan bölümü buradan Kiroku'ya yazar
+// (içerik betiği Kiroku'ya doğrudan istek atamaz). Gövde: { mangaId?, title, chapter, url }.
+// 404'te Kiroku benzer adları (candidates) döner; içerik betiği kullanıcıya seçtirip mangaId ile tekrar dener.
+// ============================================================
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action !== "saveMangaProgress" && request.action !== "searchKirokuManga") return;
+    chrome.storage.local.get(["service_url", "auth_token"], async (result) => {
+        const serviceUrl = (result.service_url || "").trim().replace(/\/+$/, "");
+        if (!serviceUrl) return sendResponse({ success: false, error: "Eklentide Service URL ayarlı değil" });
+        try {
+            const res = request.action === "saveMangaProgress"
+                ? await fetch(`${serviceUrl}/api/manga/digital-progress`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", ...authHeader(result.auth_token) },
+                      body: JSON.stringify(request.data),
+                      credentials: "omit",
+                  })
+                : await fetch(`${serviceUrl}/api/manga?q=${encodeURIComponent(request.q || "")}&count=8`, {
+                      headers: authHeader(result.auth_token),
+                      credentials: "omit",
+                  });
+            const data = await res.json().catch(() => null);
+            if (res.status === 401) return sendResponse({ success: false, error: LOGIN_REQUIRED });
+            if (res.status === 404) return sendResponse({ success: false, notFound: true, candidates: data?.candidates || [], error: data?.message });
+            if (!res.ok) return sendResponse({ success: false, error: data?.message || `Hata (${res.status})` });
+            sendResponse({ success: true, data });
+        } catch (err) {
+            sendResponse({ success: false, error: err.message });
+        }
+    });
+    return true;
+});

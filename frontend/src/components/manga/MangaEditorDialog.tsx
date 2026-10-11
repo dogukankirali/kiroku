@@ -25,7 +25,7 @@ import { alpha } from "@mui/material/styles";
 import { searchManga, type AniListManga } from "../../Services/anilist";
 import { MangaService, errorText, fromAniList, type Manga, type MangaInput } from "../../Services/MangaService";
 import { palette } from "../../theme/customTheme";
-import { FORMAT_LABEL, PUB_STATUS_LABEL, READ_STATUS_LABEL } from "./mangaLabels";
+import { FORMAT_LABEL, PUB_STATUS_LABEL, READ_FORMAT_LABEL, READ_STATUS_LABEL } from "./mangaLabels";
 
 type Props = {
   open: boolean;
@@ -107,7 +107,7 @@ export default function MangaEditorDialog({ open, manga, isAdmin, onClose, onSav
       const payload: MangaInput = { ...form };
       // Non-admins never send catalog fields on edit (the Worker would ignore them anyway)
       if (!isNew && !isAdmin) {
-        for (const k of ["name", "englishName", "status", "format", "totalChapters", "totalVolumes", "malScore", "genres", "cover", "anilistId", "malId", "malLink", "anilistLink"] as const) {
+        for (const k of ["name", "englishName", "status", "format", "totalChapters", "totalVolumes", "malScore", "genres", "cover", "anilistId", "malId", "malLink", "anilistLink", "seriesName"] as const) {
           delete payload[k];
         }
       }
@@ -123,6 +123,7 @@ export default function MangaEditorDialog({ open, manga, isAdmin, onClose, onSav
     <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.5 }}>
       <TextField label="Ad" value={form.name ?? ""} onChange={(e) => set("name", e.target.value)} required />
       <TextField label="İngilizce ad" value={form.englishName ?? ""} onChange={(e) => set("englishName", e.target.value)} />
+      <TextField label="Seri" value={form.seriesName ?? ""} onChange={(e) => set("seriesName", e.target.value)} sx={{ gridColumn: { sm: "1 / -1" } }} />
       <TextField select label="Yayın durumu" value={form.status ?? ""} onChange={(e) => set("status", e.target.value)}>
         <MenuItem value="">—</MenuItem>
         {Object.entries(PUB_STATUS_LABEL).map(([k, v]) => (
@@ -204,6 +205,14 @@ export default function MangaEditorDialog({ open, manga, isAdmin, onClose, onSav
                 onChange={(e) => set("chaptersRead", Math.max(0, Number(e.target.value)))} />
               <TextField type="number" label={`Okunan cilt${form.totalVolumes ? ` / ${form.totalVolumes}` : ""}`} value={form.volumesRead ?? 0}
                 onChange={(e) => set("volumesRead", Math.max(0, Number(e.target.value)))} />
+              <TextField select label="Okuma biçimi" value={form.readFormat ?? ""} onChange={(e) => set("readFormat", e.target.value as MangaInput["readFormat"])}>
+                <MenuItem value="">—</MenuItem>
+                {Object.entries(READ_FORMAT_LABEL).map(([k, v]) => (
+                  <MenuItem key={k} value={k}>{v}</MenuItem>
+                ))}
+              </TextField>
+              <TextField type="number" label="Dijitalde kalınan bölüm" value={form.digitalChapter ?? ""} inputProps={{ step: 0.5, min: 0 }}
+                onChange={(e) => set("digitalChapter", e.target.value === "" ? null : Math.max(0, Number(e.target.value)))} />
               <TextField type="date" label="Başlama" InputLabelProps={{ shrink: true }} value={form.startedAt ?? ""} onChange={(e) => set("startedAt", e.target.value)} />
               <TextField type="date" label="Bitiş" InputLabelProps={{ shrink: true }} value={form.finishedAt ?? ""} onChange={(e) => set("finishedAt", e.target.value)} />
             </Box>

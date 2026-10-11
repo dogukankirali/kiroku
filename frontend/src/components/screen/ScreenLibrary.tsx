@@ -44,6 +44,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { ScreenService, errorText, type ScreenKind, type ScreenQuery, type ScreenTitle } from "../../Services/ScreenService";
 import { GenreChips } from "../Common/GenreChip";
 import { palette } from "../../theme/customTheme";
+import { useDelayedFlag } from "../../lib/useDelayedFlag";
 import ScreenEditorDialog from "./ScreenEditorDialog";
 import { KIND_TEXT, SERIES_STATUS_LABEL, WATCH_STATUS_COLOR, WATCH_STATUS_LABEL, progressText } from "./screenLabels";
 
@@ -146,6 +147,8 @@ export default function ScreenLibrary({ kind }: { kind: ScreenKind }) {
   const [total, setTotal] = useState(0);
   const [genres, setGenres] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  // Hızlı (ör. boş) yüklemelerde iskelet bir anlığına görünüp kaybolmasın
+  const showSkeleton = useDelayedFlag(loading && !data.length);
   const [error, setError] = useState("");
   const [toast, setToast] = useState<Toast>(null);
   const [editing, setEditing] = useState<ScreenTitle | null | undefined>(undefined);
@@ -260,7 +263,7 @@ export default function ScreenLibrary({ kind }: { kind: ScreenKind }) {
 
       {loading && !data.length ? (
         <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 2 }}>
-          {Array.from({ length: 12 }).map((_, i) => <Skeleton key={i} variant="rounded" sx={{ aspectRatio: "2 / 3", height: "auto", borderRadius: "14px", bgcolor: alpha(palette.overlay, 0.04) }} />)}
+          {showSkeleton && Array.from({ length: 12 }).map((_, i) => <Skeleton key={i} variant="rounded" sx={{ aspectRatio: "2 / 3", height: "auto", borderRadius: "14px", bgcolor: alpha(palette.overlay, 0.04) }} />)}
         </Box>
       ) : !data.length && !error ? (
         <Box sx={{ textAlign: "center", py: 8, borderRadius: "16px", border: `1px dashed ${alpha(palette.overlay, 0.12)}` }}>

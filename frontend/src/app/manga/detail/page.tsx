@@ -102,6 +102,17 @@ function MangaDetail() {
           </Box>
           <Box sx={{ display: "flex", gap: 0.75, flexWrap: "wrap" }}>
             {manga.readStatus && <Chip size="small" label={READ_STATUS_LABEL[manga.readStatus]} sx={{ color, backgroundColor: alpha(color, 0.14) }} />}
+            {manga.readFormat && <Chip size="small" variant="outlined" label={manga.readFormat === "DIGITAL" ? "Dijital" : "Fiziksel"} />}
+            {manga.digitalChapter != null && (
+              <Chip
+                size="small"
+                color="primary"
+                variant="outlined"
+                label={`Dijitalde bölüm ${manga.digitalChapter}${manga.digitalSite ? ` · ${manga.digitalSite}` : ""}`}
+                {...(manga.digitalUrl ? { component: "a", href: manga.digitalUrl, target: "_blank", rel: "noopener noreferrer", clickable: true } : {})}
+              />
+            )}
+            {manga.seriesName && <Chip size="small" variant="outlined" label={`Seri: ${manga.seriesName}`} />}
             {manga.format && <Chip size="small" label={FORMAT_LABEL[manga.format] ?? manga.format} />}
             {manga.status && <Chip size="small" label={PUB_STATUS_LABEL[manga.status] ?? manga.status} />}
             {manga.malScore > 0 && <Chip size="small" label={`Ortalama ${manga.malScore.toFixed(1)}`} />}

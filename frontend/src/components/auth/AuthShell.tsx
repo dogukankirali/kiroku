@@ -6,17 +6,41 @@ import { Box, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import StorageRoundedIcon from "@mui/icons-material/StorageRounded";
 import { palette } from "../../theme/customTheme";
-import { AnimeService } from "../../Services/AnimeServices";
+import axios from "axios";
+import { API_BASE } from "../../Services/http";
 
-// Sol panelde kayan kapak mozaiği: en yüksek puanlı animeler. Kapak uç noktası herkese açık;
-// liste alınamazsa yalnızca renkli arka plan kalır.
+// Sol panelde kayan kapak mozaiği: en yüksek puanlı animeler. Liste giriş istediği için mozaik
+// herkese açık /anime-showcase'ten beslenir; alınamazsa yalnızca renkli arka plan kalır.
+const MOSAIC_CACHE_KEY = "kirokuMosaicCovers";
+const MOSAIC_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function readMosaicCache(count: number): string[] | null {
+  try {
+    const raw = JSON.parse(localStorage.getItem(MOSAIC_CACHE_KEY) || "null");
+    if (raw && Date.now() - raw.at < MOSAIC_TTL_MS && Array.isArray(raw.covers) && raw.covers.length >= count) return raw.covers.slice(0, count);
+  } catch {}
+  return null;
+}
+
+// Liste tarayıcıda bir hafta saklanır: giriş sayfası her açıldığında istek atılmaz
 function useMosaicCovers(count: number) {
   const [covers, setCovers] = useState<string[]>([]);
   useEffect(() => {
     let alive = true;
-    AnimeService.getAnimes({ page: 1, count, orderBy: "Score", order: "desc", filters: [] })
-      .then((res: any) => {
-        const list: string[] = (res?.data ?? []).map((a: any) => a.Cover).filter((c: any) => typeof c === "string" && c);
+    const cached = readMosaicCache(count);
+    if (cached) {
+      setCovers(cached);
+      return;
+    }
+    axios
+      .get<string[]>(`${API_BASE}/anime-showcase`, { params: { count } })
+      .then((res) => {
+        const list = (Array.isArray(res.data) ? res.data : []).filter((c) => typeof c === "string" && c);
+        if (list.length) {
+          try {
+            localStorage.setItem(MOSAIC_CACHE_KEY, JSON.stringify({ at: Date.now(), covers: list }));
+          } catch {}
+        }
         if (alive) setCovers(list);
       })
       .catch(() => {});

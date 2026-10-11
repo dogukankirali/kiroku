@@ -13,9 +13,11 @@ import OpenInNewRoundedIcon from "@mui/icons-material/OpenInNewRounded";
 import StarRoundedIcon from "@mui/icons-material/StarRounded";
 import FavoriteRoundedIcon from "@mui/icons-material/FavoriteRounded";
 import BookmarkRoundedIcon from "@mui/icons-material/BookmarkRounded";
+import LiveTvRoundedIcon from "@mui/icons-material/LiveTvRounded";
 import { AnimeService } from "../../../Services/AnimeServices";
 import { palette } from "../../../theme/customTheme";
 import { formatWatchDate } from "../../../components/anime/WatchDates";
+import { listVideoLibrary, loadVideoLibrary, matchFolder } from "../../../lib/videoLibrary";
 import {
   FORMAT_TR,
   MediaDetail,
@@ -117,6 +119,8 @@ function DetailContent() {
   const [catalog, setCatalog] = useState<TEATable.IAnime[]>([]);
   const [showSpoilers, setShowSpoilers] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  // Salon: "match" kütüphanede bu animenin klasörü var, "pick" kütüphane var ama klasör eşleşmedi, "setup" ayarlanmadı
+  const [salon, setSalon] = useState<"match" | "pick" | "setup" | null>(null);
 
   useEffect(() => {
     if (!id) return setError("Geçersiz anime");
@@ -140,6 +144,24 @@ function DetailContent() {
     })();
     return () => ctrl.abort();
   }, [id]);
+
+  useEffect(() => {
+    if (!anime) return;
+    let alive = true;
+    setSalon(null);
+    const cfg = loadVideoLibrary();
+    if (cfg.kind === "local") return setSalon("pick");
+    if (!cfg.url) return setSalon("setup");
+    listVideoLibrary("")
+      .then((entries) => {
+        const dirs = entries.filter((e) => e.isDir).map((e) => e.name);
+        if (alive) setSalon(matchFolder(anime.ID, [String(anime.Name), String(anime.EnglishName ?? "")], dirs) ? "match" : "pick");
+      })
+      .catch(() => alive && setSalon(null));
+    return () => {
+      alive = false;
+    };
+  }, [anime]);
 
   // İlişkili/önerilen animelerin arşivde olup olmadığını bulmak için katalog
   useEffect(() => {
@@ -234,6 +256,19 @@ function DetailContent() {
               {media?.popularity ? <Stat label="Popülerlik" value={media.popularity.toLocaleString("tr")} /> : null}
               {media?.favourites ? <Stat label="Favori" value={media.favourites.toLocaleString("tr")} icon={<FavoriteRoundedIcon sx={{ color: palette.danger, fontSize: 20 }} />} /> : null}
             </Box>
+            {anime && salon ? (
+              <Box sx={{ mt: 2.5 }}>
+                {salon === "match" ? (
+                  <Button variant="contained" component={Link} href={`/salon?id=${anime.ID}`} startIcon={<LiveTvRoundedIcon />}>
+                    Salon&apos;da izle
+                  </Button>
+                ) : (
+                  <Button size="small" component={Link} href={`/salon?id=${anime.ID}`} startIcon={<LiveTvRoundedIcon />} sx={{ color: palette.textMuted }}>
+                    {salon === "setup" ? "Salon'u ayarla" : "Salon'da klasör seç"}
+                  </Button>
+                )}
+              </Box>
+            ) : null}
           </Box>
         </Box>
       </Box>

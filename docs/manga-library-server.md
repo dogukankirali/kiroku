@@ -77,6 +77,7 @@ In the reader's library settings (stored per browser) choose **HTTP (Caddy)**, e
 - The live site is https, so the library address must be https too; the tunnel provides it.
 - To test the server from `localhost:3000`, temporarily allow that origin (or `*`) in `Access-Control-Allow-Origin`.
 - While the server is off, the reader cannot open chapters.
+- **Salon (anime videos)**: `<video>` cannot send the Basic auth header, so serve the anime folder from a second site block that checks a `?key=` query instead, e.g. `@authed query key={$ANIME_KEY}` → `handle @authed { root * /srv/anime; file_server browse }` and `respond 401` otherwise (keep the same CORS headers and preflight block). Caddy's `file_server` already answers range requests. In Kiroku, enter the address and the key in Salon's library settings.
 - Security: the folder is mounted read-only, every request except the preflight needs the password, CORS only allows the Kiroku site, and no port is opened on the home network. Use a long random password; anyone with it can read the library.
 
 ---
@@ -115,4 +116,5 @@ Okuyucunun kütüphane ayarlarında (her tarayıcıda ayrı tutulur) **HTTP (Cad
 - Canlı site https olduğu için kütüphane adresi de https olmalı; tunnel bunu sağlıyor.
 - Sunucuyu `localhost:3000`'den denemek için `Access-Control-Allow-Origin`'e geçici olarak o adresi (ya da `*`) ekle.
 - Sunucu kapalıyken okuyucu bölüm açamaz.
+- **Salon (anime videoları)**: `<video>` Basic auth başlığı gönderemediği için anime klasörünü `?key=` sorgusunu kontrol eden ikinci bir site bloğundan sun. Örnek: `@authed query key={$ANIME_KEY}` → `handle @authed { root * /srv/anime; file_server browse }`, diğer durumlarda `respond 401` (aynı CORS başlıkları ve ön kontrol bloğu kalsın). Caddy'nin `file_server`'ı aralıklı istekleri zaten yanıtlar. Kiroku'da adres ve anahtarı Salon'un kütüphane ayarına gir.
 - Güvenlik: klasör salt okunur bağlanır, ön kontrol dışındaki her istek şifre ister, CORS yalnızca Kiroku sitesine izin verir ve ev ağında port açılmaz. Uzun, rastgele bir şifre kullan; şifreyi bilen kütüphaneyi okuyabilir.

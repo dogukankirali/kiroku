@@ -65,16 +65,35 @@ function bestMatch(name: string, list: Media[]): Media | undefined {
   );
 }
 
-// Go sürümündeki sıra: ana hikaye → alternatif → devam/önceki (başlığın ':' öncesi)
+/**
+ * Sezon ekini atıp serinin ortak adını bırakır: "Seihantai na Kimi to Boku 2nd Season" → "Seihantai na Kimi to Boku",
+ * "Kimetsu no Yaiba: Yuukaku-hen" → "Kimetsu no Yaiba", "Mob Psycho 100 III" → "Mob Psycho 100".
+ */
+export function seriesBaseTitle(title: string): string {
+  // Yalnızca ": " ile ayrılan alt başlık atılır ("Re:Zero" gibi adlar bozulmasın)
+  let t = title.split(/:\s/)[0].trim();
+  const SUFFIX =
+    /\s+(?:\(?\d+(?:st|nd|rd|th)\s+(?:season|cour)\)?|season\s*\d+|(?:part|cour)\s*\d+|(?:the\s+)?final\s+season|2nd|3rd|\d+th|ii|iii|iv|v|vi|\d)$/i;
+  for (let i = 0; i < 3 && SUFFIX.test(t); i++) t = t.replace(SUFFIX, "").trim();
+  return t;
+}
+
+/**
+ * Animenin serisi. Önce ana hikaye (spin-off'lar için), sonra önceki sezon; ilk sezon devamı varsa kendi
+ * adıyla seriyi başlatır. Her sezon sezon eki atılmış ortak adı kullandığı için 1. ve 2. sezon aynı
+ * seride buluşur (eskiden 1. sezon devamının tam adını, 2. sezon 1. sezonun adını alıp ayrılıyordu).
+ */
 function seriesNameFor(m: Media): string {
   const edges = (m.relations?.edges ?? []).filter((e) => e.node.type === "ANIME");
-  const title = (e: (typeof edges)[number]) => e.node.title.romaji ?? e.node.title.english ?? "";
-  const parent = edges.find((e) => e.relationType === "PARENT");
-  if (parent) return title(parent).trim();
-  const alt = edges.find((e) => e.relationType === "ALTERNATIVE");
-  if (alt) return title(alt).trim();
-  const seq = edges.find((e) => e.relationType === "SEQUEL" || e.relationType === "PREQUEL");
-  if (seq) return title(seq).split(":")[0].trim();
+  const title = (t: { romaji: string | null; english: string | null }) => (t.romaji ?? t.english ?? "").trim();
+  const find = (type: string) => edges.find((e) => e.relationType === type);
+  const parent = find("PARENT");
+  if (parent) return seriesBaseTitle(title(parent.node.title));
+  const prequel = find("PREQUEL");
+  if (prequel) return seriesBaseTitle(title(prequel.node.title));
+  if (find("SEQUEL")) return seriesBaseTitle(title(m.title));
+  const alt = find("ALTERNATIVE");
+  if (alt) return seriesBaseTitle(title(alt.node.title));
   return "";
 }
 

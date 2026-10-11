@@ -109,6 +109,8 @@
         <div id="panel-table" class="panel">
             <button class="mat-btn btn-outline w-100 mb-3 btn-back">Ana Ekrana Dön</button>
             <h4 class="mt-0 mb-3 text-center">İzleme Geçmişi</h4>
+            <button id="btn-import-rated" class="mat-btn btn-primary w-100 mb-2">⬆️ Puanlananları Kiroku'ya aktar</button>
+            <div id="import-rated-status" class="syncer-status" style="display:none; margin-bottom: 8px;"></div>
             <div id="table-container" class="table-container"></div>
         </div>
 
@@ -144,6 +146,14 @@
     <!-- TAB 3: CONFIGS -->
     <div class="tab-content configs-tab">
         <div id="configs-status" class="syncer-status"></div>
+
+        <!-- Dijital manga okuma siteleri -->
+        <div class="mat-card mb-3">
+            <div style="font-weight:600; margin-bottom:6px;">📖 Manga okuma siteleri</div>
+            <div style="font-size:11px; color:var(--text-secondary); margin-bottom:6px;">Bu sitelerde okuduğun bölüm Kiroku'ya kaydedilir. Her satıra bir alan adı.</div>
+            <textarea id="manga-sites" class="mat-input" rows="4" style="width:100%; font-size:12px; resize:vertical;"></textarea>
+            <button class="mat-btn btn-primary w-100" id="manga-sites-save" style="margin-top:6px;">Kaydet</button>
+        </div>
 
         <!-- Manga İndirici (ayrı sekmede açılır) -->
         <button class="mat-btn btn-secondary w-100 mb-3" id="open-manga-downloader">📚 Manga İndirici</button>

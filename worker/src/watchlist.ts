@@ -136,3 +136,34 @@ watchlist.post("/watchlist/sync", requireAuth, async (c) => {
   const total = await db.prepare("SELECT COUNT(*) AS n FROM watch_lists WHERE user_id = ?").bind(userId).first<{ n: number }>();
   return c.json({ message: "Auto sync completed successfully", added: missing.results.length, total: total?.n ?? 0 });
 });
+
+// ------------------------------ Waitlist ------------------------------
+// Henüz yayınlanmamış animeler (user_anime.wait_list). Plan to Watch'tan ayrıdır; yayın takibi yeni bölüm
+// bildirimlerini bu listedekilere de gönderir. Sıra: önce yayın tarihi yakın olanlar.
+
+watchlist.get("/waitlist", requireAuth, async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT ${LIST_COLUMNS} FROM animes a
+     LEFT JOIN anime_series s ON s.id = a.series
+     JOIN user_anime u ON u.anime_id = a.id AND u.user_id = ?
+     WHERE u.wait_list = 1
+     ORDER BY COALESCE(a.next_episode_at, a.start_date, '9999') ASC, LOWER(a.name) ASC`
+  )
+    .bind(await viewerId(c))
+    .all();
+  return c.json(results.map((r) => toAnime(c, r as Parameters<typeof toAnime>[1])));
+});
+
+// Gövde: { id } → animeyi waitlist'e ekler (kullanıcının kaydı yoksa oluşturur)
+watchlist.post("/waitlist", requireAuth, async (c) => {
+  const id = int(field(await readJson(c), "id"), -1);
+  if (id < 0) return c.json({ message: "Geçersiz anime" }, 400);
+  if (!(await c.env.DB.prepare("SELECT id FROM animes WHERE id = ?").bind(id).first())) return c.json({ message: "Anime bulunamadı" }, 404);
+  await upsertUserAnime(c.env.DB, c.get("user")!.userId, id, { wait_list: 1 }).run();
+  return c.json({ message: "OK" });
+});
+
+watchlist.delete("/waitlist/:id{[0-9]+}", requireAuth, async (c) => {
+  await upsertUserAnime(c.env.DB, c.get("user")!.userId, int(c.req.param("id")), { wait_list: 0 }).run();
+  return c.json({ message: "OK" });
+});
