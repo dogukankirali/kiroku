@@ -28,6 +28,8 @@ type AnimeRow = {
   anilist_id?: number | null;
   next_episode?: number | null;
   next_episode_at?: string | null;
+  wait_list?: number | null;
+  start_date?: string | null;
   aired_episodes?: number | null;
   genre?: string | null;
   series_name?: string | null;
@@ -39,6 +41,7 @@ const INLINE_COVER = "__inline__";
 export const LIST_COLUMNS = `a.id, a.name, a.english_name, a.anime_status, COALESCE(u.watch_status, 0) AS watch_status, a.total_number_of_episodes, a.is_movie,
   u.score, a.mal_score, u.notes, a.anime_link, a.mal_anime_link, a.series, COALESCE(u.plan_to_watch, 0) AS plan_to_watch,
   u.user_id IS NOT NULL AS in_list, u.started_at, u.finished_at, a.anilist_id, a.next_episode, a.next_episode_at, a.aired_episodes,
+  COALESCE(u.wait_list, 0) AS wait_list, a.start_date,
   CASE WHEN a.cover LIKE 'data:%' THEN '${INLINE_COVER}' ELSE a.cover END AS cover,
   (SELECT group_concat(g.genre_name, ', ') FROM animes_genres ag JOIN genres g ON g.id = ag.genre_id WHERE ag.anime_id = a.id) AS genre,
   s.name AS series_name`;
@@ -77,6 +80,8 @@ export function toAnime(c: Ctx, r: AnimeRow) {
     AiredEpisodes: r.aired_episodes ?? 0,
     StartedAt: r.started_at ?? "",
     FinishedAt: r.finished_at ?? "",
+    WaitList: Boolean(r.wait_list),
+    StartDate: r.start_date ?? "",
   };
 }
 
@@ -206,6 +211,7 @@ function animeFields(body: Record<string, unknown>) {
     mal_anime_link: str(field(body, "MALAnimeLink")),
     cover: str(field(body, "Cover")),
     series: int(field(body, "Series")),
+    start_date: /^\d{4}(-\d{2}){0,2}$/.test(str(field(body, "StartDate"))) ? str(field(body, "StartDate")) : "",
   };
 }
 
@@ -216,6 +222,8 @@ function userFields(body: Record<string, unknown>) {
     watch_status: int(field(body, "WatchStatus")),
     plan_to_watch: bool(field(body, "PlanToWatch")) ? 1 : 0,
     notes: str(field(body, "Notes")),
+    // Gövdede yoksa (eski istemciler, eklenti) waitlist işaretine dokunulmaz
+    ...(field(body, "WaitList") !== undefined ? { wait_list: bool(field(body, "WaitList")) ? 1 : 0 } : {}),
   };
 }
 
@@ -296,6 +304,18 @@ anime.get("/anime-cover", async (c) => {
   const headers = { "Cache-Control": "public, max-age=86400", ETag: etag };
   if (c.req.header("If-None-Match") === etag) return new Response(null, { status: 304, headers });
   return new Response(img, { headers: { ...headers, "Content-Type": contentType } });
+});
+
+// Giriş sayfasındaki kapak mozaiği için herkese açık: yalnızca en yüksek puanlı animelerin kapak adresleri
+anime.get("/anime-showcase", async (c) => {
+  const count = Math.min(Math.max(int(c.req.query("count")) || 24, 1), 48);
+  const { results } = await c.env.DB.prepare(
+    "SELECT id, cover FROM animes WHERE cover IS NOT NULL AND cover <> '' ORDER BY mal_score DESC, id ASC LIMIT ?"
+  )
+    .bind(count)
+    .all<{ id: number; cover: string }>();
+  c.header("Cache-Control", "public, max-age=604800");
+  return c.json(results.map((r) => (r.cover === INLINE_COVER || r.cover.startsWith("data:") ? coverUrl(c, r.id) : r.cover)));
 });
 
 anime.all("/get-genres", async (c) => {

@@ -112,6 +112,7 @@ function MangaDetail() {
                 {...(manga.digitalUrl ? { component: "a", href: manga.digitalUrl, target: "_blank", rel: "noopener noreferrer", clickable: true } : {})}
               />
             )}
+            {manga.seriesName && <Chip size="small" variant="outlined" label={`Seri: ${manga.seriesName}`} />}
             {manga.format && <Chip size="small" label={FORMAT_LABEL[manga.format] ?? manga.format} />}
             {manga.status && <Chip size="small" label={PUB_STATUS_LABEL[manga.status] ?? manga.status} />}
             {manga.malScore > 0 && <Chip size="small" label={`Ortalama ${manga.malScore.toFixed(1)}`} />}

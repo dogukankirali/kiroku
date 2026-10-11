@@ -11,6 +11,7 @@ import ImageOutlinedIcon from "@mui/icons-material/ImageOutlined";
 import DoneAllRoundedIcon from "@mui/icons-material/DoneAllRounded";
 import BookmarkAddedRoundedIcon from "@mui/icons-material/BookmarkAddedRounded";
 import BookmarkBorderRoundedIcon from "@mui/icons-material/BookmarkBorderRounded";
+import HourglassTopRoundedIcon from "@mui/icons-material/HourglassTopRounded";
 import { Field, Segmented, TextInput, fieldBg, fieldBorder } from "../ui/FormControls";
 import { GenreChip, genreLabel } from "../Common/GenreChip";
 import { palette } from "../../theme/customTheme";
@@ -317,6 +318,18 @@ export default function AnimeForm({
             options={[
               { value: false, label: <><BookmarkBorderRoundedIcon /> Listede değil</> },
               { value: true, label: <><BookmarkAddedRoundedIcon /> İzlenecekler listesinde</> },
+            ]}
+          />
+        </Field>
+
+        <Field label="Waitlist" hint="Yayınlanmasını beklediklerin" sx={{ gridColumn: "1 / -1" }}>
+          <Segmented
+            value={Boolean(value.WaitList)}
+            disabled={readOnly}
+            onChange={(v) => onChange({ WaitList: v })}
+            options={[
+              { value: false, label: <>Waitlist'te değil</> },
+              { value: true, label: <><HourglassTopRoundedIcon /> Waitlist'te</> },
             ]}
           />
         </Field>

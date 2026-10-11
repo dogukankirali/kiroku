@@ -218,7 +218,11 @@ export default function Sidebar({ collapsed, onToggleCollapsed, onNavigate }: Si
         <UserCard collapsed={collapsed} />
         {onToggleCollapsed && (
           <Box sx={{ display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "space-between", mt: 1, px: collapsed ? 0 : 0.5 }}>
-            {!collapsed && <Typography sx={{ fontSize: "0.7rem", color: palette.textFaint }}>v3.0.0-dev</Typography>}
+            {!collapsed && (
+              <Tooltip title={process.env.NEXT_PUBLIC_APP_COMMIT ? `Commit ${process.env.NEXT_PUBLIC_APP_COMMIT}` : ""} placement="top">
+                <Typography sx={{ fontSize: "0.7rem", color: palette.textFaint }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "3.0.0"}</Typography>
+              </Tooltip>
+            )}
             <Tooltip title={collapsed ? "Menüyü genişlet" : "Menüyü daralt"} placement="right">
               <IconButton size="small" onClick={onToggleCollapsed} sx={{ color: palette.textMuted }}>
                 {collapsed ? <KeyboardDoubleArrowRightIcon fontSize="small" /> : <KeyboardDoubleArrowLeftIcon fontSize="small" />}

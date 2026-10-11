@@ -43,6 +43,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { BookService, errorText, type Book, type BookQuery } from "../../Services/BookService";
 import { GenreChips } from "../Common/GenreChip";
 import { palette } from "../../theme/customTheme";
+import { useDelayedFlag } from "../../lib/useDelayedFlag";
 import BookEditorDialog from "./BookEditorDialog";
 import { BOOK_STATUS_COLOR, BOOK_STATUS_LABEL, LANGUAGE_LABEL, pagesText, yearOf } from "./bookLabels";
 
@@ -135,6 +136,8 @@ export default function BookLibrary() {
   const [total, setTotal] = useState(0);
   const [genres, setGenres] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  // Hızlı (ör. boş) yüklemelerde iskelet bir anlığına görünüp kaybolmasın
+  const showSkeleton = useDelayedFlag(loading && !data.length);
   const [error, setError] = useState("");
   const [toast, setToast] = useState<Toast>(null);
   const [editing, setEditing] = useState<Book | null | undefined>(undefined);
@@ -246,7 +249,7 @@ export default function BookLibrary() {
 
       {loading && !data.length ? (
         <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 2 }}>
-          {Array.from({ length: 12 }).map((_, i) => <Skeleton key={i} variant="rounded" sx={{ aspectRatio: "2 / 3", height: "auto", borderRadius: "14px", bgcolor: alpha(palette.overlay, 0.04) }} />)}
+          {showSkeleton && Array.from({ length: 12 }).map((_, i) => <Skeleton key={i} variant="rounded" sx={{ aspectRatio: "2 / 3", height: "auto", borderRadius: "14px", bgcolor: alpha(palette.overlay, 0.04) }} />)}
         </Box>
       ) : !data.length && !error ? (
         <Box sx={{ textAlign: "center", py: 8, borderRadius: "16px", border: `1px dashed ${alpha(palette.overlay, 0.12)}` }}>

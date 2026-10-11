@@ -107,7 +107,7 @@ export default function MangaEditorDialog({ open, manga, isAdmin, onClose, onSav
       const payload: MangaInput = { ...form };
       // Non-admins never send catalog fields on edit (the Worker would ignore them anyway)
       if (!isNew && !isAdmin) {
-        for (const k of ["name", "englishName", "status", "format", "totalChapters", "totalVolumes", "malScore", "genres", "cover", "anilistId", "malId", "malLink", "anilistLink"] as const) {
+        for (const k of ["name", "englishName", "status", "format", "totalChapters", "totalVolumes", "malScore", "genres", "cover", "anilistId", "malId", "malLink", "anilistLink", "seriesName"] as const) {
           delete payload[k];
         }
       }
@@ -123,6 +123,7 @@ export default function MangaEditorDialog({ open, manga, isAdmin, onClose, onSav
     <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" }, gap: 1.5 }}>
       <TextField label="Ad" value={form.name ?? ""} onChange={(e) => set("name", e.target.value)} required />
       <TextField label="İngilizce ad" value={form.englishName ?? ""} onChange={(e) => set("englishName", e.target.value)} />
+      <TextField label="Seri" value={form.seriesName ?? ""} onChange={(e) => set("seriesName", e.target.value)} sx={{ gridColumn: { sm: "1 / -1" } }} />
       <TextField select label="Yayın durumu" value={form.status ?? ""} onChange={(e) => set("status", e.target.value)}>
         <MenuItem value="">—</MenuItem>
         {Object.entries(PUB_STATUS_LABEL).map(([k, v]) => (
