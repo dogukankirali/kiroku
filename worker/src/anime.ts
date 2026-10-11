@@ -314,7 +314,7 @@ anime.get("/anime-showcase", async (c) => {
   )
     .bind(count)
     .all<{ id: number; cover: string }>();
-  c.header("Cache-Control", "public, max-age=3600");
+  c.header("Cache-Control", "public, max-age=86400");
   return c.json(results.map((r) => (r.cover === INLINE_COVER || r.cover.startsWith("data:") ? coverUrl(c, r.id) : r.cover)));
 });
 

@@ -11,14 +11,36 @@ import { API_BASE } from "../../Services/http";
 
 // Sol panelde kayan kapak mozaiği: en yüksek puanlı animeler. Liste giriş istediği için mozaik
 // herkese açık /anime-showcase'ten beslenir; alınamazsa yalnızca renkli arka plan kalır.
+const MOSAIC_CACHE_KEY = "kirokuMosaicCovers";
+const MOSAIC_TTL_MS = 24 * 60 * 60 * 1000;
+
+function readMosaicCache(count: number): string[] | null {
+  try {
+    const raw = JSON.parse(localStorage.getItem(MOSAIC_CACHE_KEY) || "null");
+    if (raw && Date.now() - raw.at < MOSAIC_TTL_MS && Array.isArray(raw.covers) && raw.covers.length >= count) return raw.covers.slice(0, count);
+  } catch {}
+  return null;
+}
+
+// Liste tarayıcıda bir gün saklanır: giriş sayfası her açıldığında istek atılmaz
 function useMosaicCovers(count: number) {
   const [covers, setCovers] = useState<string[]>([]);
   useEffect(() => {
     let alive = true;
+    const cached = readMosaicCache(count);
+    if (cached) {
+      setCovers(cached);
+      return;
+    }
     axios
       .get<string[]>(`${API_BASE}/anime-showcase`, { params: { count } })
       .then((res) => {
         const list = (Array.isArray(res.data) ? res.data : []).filter((c) => typeof c === "string" && c);
+        if (list.length) {
+          try {
+            localStorage.setItem(MOSAIC_CACHE_KEY, JSON.stringify({ at: Date.now(), covers: list }));
+          } catch {}
+        }
         if (alive) setCovers(list);
       })
       .catch(() => {});
