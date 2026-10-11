@@ -310,17 +310,23 @@ function toUtf8(bytes, lang) {
   }
 }
 
-/** İlk altyazı dosyasını RAR paketinden çıkarır (imajda unrar varsa) */
+/** RAR açabilen araç: unrar ya da 7-Zip (imajda varsa) */
+const rarTool = ["unrar", "7zz", "7z"].find((bin) => spawnSync(bin, bin === "unrar" ? [] : ["i"], { stdio: "ignore" }).error === undefined);
+
+/** İlk altyazı dosyasını RAR paketinden çıkarır */
 async function firstSubtitleInRar(bytes) {
+  if (!rarTool) throw new Error("RAR paketi için sunucuda unrar ya da 7zip gerekli (imaja ekle)");
   const dir = await mkdtemp(join(tmpdir(), "kiroku-rar-"));
   try {
     const archive = join(dir, "a.rar");
     await writeFile(archive, bytes);
-    const list = spawnSync("unrar", ["lb", archive], { encoding: "utf8" });
-    if (list.error) throw new Error("RAR paketi için sunucuda unrar gerekli (imajı güncel Dockerfile ile yeniden derle)");
-    const name = list.stdout.split("\n").map((l) => l.trim()).find((l) => /\.(srt|ass|ssa|vtt)$/i.test(l));
+    const listing =
+      rarTool === "unrar"
+        ? spawnSync("unrar", ["lb", archive], { encoding: "utf8" }).stdout.split("\n").map((l) => l.trim())
+        : spawnSync(rarTool, ["l", "-ba", "-slt", archive], { encoding: "utf8" }).stdout.split("\n").filter((l) => l.startsWith("Path = ")).map((l) => l.slice(7).trim());
+    const name = listing.find((l) => /\.(srt|ass|ssa|vtt)$/i.test(l));
     if (!name) return null;
-    const out = spawnSync("unrar", ["p", "-inul", archive, name], { maxBuffer: 20 * 1024 * 1024 });
+    const out = rarTool === "unrar" ? spawnSync("unrar", ["p", "-inul", archive, name], { maxBuffer: 20 * 1024 * 1024 }) : spawnSync(rarTool, ["e", "-so", "-y", archive, name], { maxBuffer: 20 * 1024 * 1024 });
     return out.status === 0 && out.stdout.length ? { name, bytes: out.stdout } : null;
   } finally {
     await rm(dir, { recursive: true, force: true });
