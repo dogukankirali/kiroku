@@ -368,7 +368,9 @@ createServer(async (req, res) => {
         // Video aynen kopyalanır (ucuz), seçilen ses AAC'ye çevrilir; parçalı MP4 olarak akar. Sarma, başka ?start= ile yeni akış demektir.
         const proc = spawn(
           "ffmpeg",
-          ["-v", "error", "-ss", String(start), "-i", target, "-map", "0:v:0", "-map", `0:a:${a}`, "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-sn",
+          ["-v", "error", "-ss", String(start), "-i", target, "-map", "0:v:0", "-map", `0:a:${a}`,
+           ...(q.has("compat") ? ["-vf", `scale=-2:'min(${Math.min(2160, Math.max(240, Math.round(Number(q.get("compat"))) || 720))},ih)',format=yuv420p`, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-g", "48", "-sc_threshold", "0"] : ["-c:v", "copy"]),
+           "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-sn",
            "-avoid_negative_ts", "make_zero", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"],
           { stdio: ["ignore", "pipe", "ignore"] }
         );

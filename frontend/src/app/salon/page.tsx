@@ -423,7 +423,7 @@ function Salon() {
                 src={media.src}
                 subtitle={media.sub}
                 tracks={media.tracks}
-                audioUrl={(index, start) => audioStreamUrl(current.file, index, start)}
+                audioUrl={(index, start, compatHeight) => audioStreamUrl(current.file, index, start, compatHeight)}
                 snapStart={(t) => keyframeBefore(current.file, t)}
                 loadSubtitle={loadEmbeddedSubtitle}
                 onFindSubtitles={subInfo ? () => setFinderOpen(true) : undefined}
