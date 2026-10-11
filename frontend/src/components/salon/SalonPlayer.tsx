@@ -166,6 +166,7 @@ export default function SalonPlayer({
 
   const wasPaused = useRef(true);
   const keepPaused = useRef(false);
+  const holdPause = useRef(false);
   const resumeAt = useRef(startAt);
   const switchToken = useRef(0);
   const pendingSeek = useRef<number | null>(null);
@@ -555,19 +556,27 @@ export default function SalonPlayer({
         onSeeked={() => setBusy(false)}
         onCanPlay={() => setBusy(false)}
         onPlaying={() => setBusy(false)}
-        onLoadedData={() => setReady(true)}
+        onLoadedData={(e) => {
+          setReady(true);
+          // Kalınan yere ilk kare çözüldükten sonra git: metadata aşamasında sarmak bazı tarayıcılarda (özellikle HEVC/MKV) siyah ekran bırakıyor
+          const v = e.currentTarget;
+          const at = resumeAt.current;
+          const hold = holdPause.current;
+          resumeAt.current = 0;
+          holdPause.current = false;
+          if (audioRef.current === null && at > 5 && at < v.duration - 10) {
+            v.currentTime = at;
+            if (!hold && v.paused) v.play().catch(() => {});
+          }
+        }}
         onLoadedMetadata={(e) => {
           const v = e.currentTarget;
           setDuration(audioRef.current !== null ? tracks?.duration || 0 : v.duration);
           v.volume = volume;
           v.playbackRate = speed;
-          if (audioRef.current === null) {
-            const at = resumeAt.current;
-            resumeAt.current = 0;
-            if (at > 5 && at < v.duration - 10) v.currentTime = at;
-          }
           if (keepPaused.current) {
             keepPaused.current = false;
+            holdPause.current = true;
             v.pause();
           }
           const track = v.textTracks[0];
@@ -577,6 +586,8 @@ export default function SalonPlayer({
           const v = e.currentTarget;
           const now = (audioRef.current !== null ? (baseRef.current ?? 0) : 0) + v.currentTime;
           if (!scrubbing && pendingSeek.current === null) setTime(now);
+          // Sarma bitince 'seeked'/'playing' hiç gelmeyen tarayıcılarda yükleme simgesi takılı kalmasın
+          if (v.readyState >= 3 && !v.seeking) setBusy(false);
           onProgress?.(now, totalRef.current);
         }}
         onProgress={(e) => {

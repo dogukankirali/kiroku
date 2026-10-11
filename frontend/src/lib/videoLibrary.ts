@@ -256,7 +256,7 @@ export async function listEpisodes(folder: string): Promise<Episode[]> {
     .sort((a, b) => a.number - b.number || a.file.localeCompare(b.file, "tr", { numeric: true }));
 }
 
-const norm = (s: string) =>
+export const norm = (s: string) =>
   s
     .normalize("NFKD")
     .replace(/[̀-ͯ]/g, "")
@@ -268,7 +268,8 @@ const norm = (s: string) =>
 /** The library folder that belongs to an anime: the one chosen earlier in this browser, else a name match */
 export function matchFolder(animeId: number, names: string[], folders: string[]): string | null {
   const saved = savedFolder(animeId);
-  if (saved && folders.includes(saved)) return saved;
+  // Kayıtlı yol iç içe olabilir ('Seri/Sezon 1'); ilk parçası kütüphanede durduğu sürece geçerli
+  if (saved && folders.includes(saved.split("/")[0])) return saved;
   const wanted = names.filter(Boolean).map(norm);
   return folders.find((f) => wanted.includes(norm(f))) ?? null;
 }
