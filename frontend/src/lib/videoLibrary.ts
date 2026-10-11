@@ -201,8 +201,10 @@ export function searchSubtitles(p: { provider: string; q: string; lang: string; 
 }
 
 /** Downloads a subtitle next to the video file on the server; returns the saved file name */
-export async function saveSubtitleFile(p: { provider: string; id: string; lang: string; file: string }): Promise<string> {
-  return (await subsJson<{ saved: string }>("__subs/save", { provider: p.provider, id: p.id, lang: p.lang, file: p.file }, { method: "POST" })).saved;
+export async function saveSubtitleFile(p: { provider: string; id: string; lang: string; file: string; episode?: string }): Promise<string> {
+  const extra: Record<string, string> = { provider: p.provider, id: p.id, lang: p.lang, file: p.file };
+  if (p.episode) extra.episode = p.episode;
+  return (await subsJson<{ saved: string }>("__subs/save", extra, { method: "POST" })).saved;
 }
 
 /** MP4 stream of the file with one chosen audio track, starting at `start` seconds (video is copied, audio becomes AAC) */
