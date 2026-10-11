@@ -456,6 +456,38 @@
 .kk-salon .settings-panel .settings-row button.active {
   outline: 2px solid var(--accent);
 }
+.kk-salon .diag-panel {
+  position: absolute;
+  inset: 8px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  background: rgba(10, 10, 14, 0.95);
+  color: #ddd;
+  border-radius: 10px;
+  padding: 10px;
+  font: 11px/1.4 ui-monospace, monospace;
+}
+.kk-salon .diag-panel pre {
+  flex: 1;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.kk-salon .diag-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.kk-salon .diag-actions button {
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  color: #fff;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
 .kk-salon video::cue {
   font-size: 1.1em;
   background: rgba(0, 0, 0, 0.6);

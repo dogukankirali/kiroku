@@ -184,6 +184,11 @@ export default function SalonPlayer({
   const [subUrl, setSubUrl] = useState<string | null>(null);
   const [subStyle, setSubStyle] = useState<SubStyle>(DEFAULT_SUB_STYLE);
   const [activeCues, setActiveCues] = useState<string[]>([]);
+  // Diagnostics: the last player events, shown in a panel the user can copy (for bug reports)
+  const diagLog = useRef<string[]>([]);
+  const diagOpenRef = useRef(false);
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [, setDiagTick] = useState(0);
   const [compat, setCompat] = useState<number>(() => readPrefs().compatHeight ?? 0);
   const audioRef = useRef(audio);
   const baseRef = useRef(base);
@@ -311,6 +316,35 @@ export default function SalonPlayer({
       detach();
     };
   }, [subUrl]);
+
+  useEffect(() => {
+    const v = video();
+    if (!v) return;
+    const events = ["loadstart", "loadedmetadata", "loadeddata", "canplay", "playing", "waiting", "stalled", "suspend", "seeking", "seeked", "error", "ended", "emptied", "abort", "play", "pause"];
+    const on = (e: Event) => {
+      const t = e.target as HTMLVideoElement;
+      const err = t.error ? ` err=${t.error.code}:${t.error.message}` : "";
+      diagLog.current = [...diagLog.current.slice(-79), `${new Date().toISOString().slice(11, 23)} ${e.type} t=${t.currentTime.toFixed(1)} rs=${t.readyState} ns=${t.networkState}${err}`];
+      if (diagOpenRef.current) setDiagTick((n) => n + 1);
+    };
+    events.forEach((n) => v.addEventListener(n, on));
+    return () => events.forEach((n) => v.removeEventListener(n, on));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const diagText = () => {
+    const v = video();
+    const ranges = v ? Array.from({ length: v.buffered.length }, (_, i) => `${v.buffered.start(i).toFixed(1)}-${v.buffered.end(i).toFixed(1)}`).join(", ") : "";
+    const src = (v?.currentSrc ?? "").replace(/key=[^&]*/, "key=***");
+    return [
+      navigator.userAgent,
+      `src: ${src}`,
+      `audio=${audio} base=${base} compat=${compat} duration=${duration} total=${total}`,
+      `currentTime=${v?.currentTime.toFixed(1)} readyState=${v?.readyState} networkState=${v?.networkState} buffered=[${ranges}]`,
+      `error: ${v?.error ? `${v.error.code} ${v.error.message}` : "yok"}`,
+      "--- olaylar ---",
+      ...diagLog.current,
+    ].join("\n");
+  };
 
   const changeSubStyle = (patch: Partial<SubStyle>) => {
     const next = { ...subStyle, ...patch };
@@ -683,7 +717,7 @@ export default function SalonPlayer({
           setMuted(e.currentTarget.muted);
         }}
         onEnded={onEnded}
-        onError={() => setError("Video açılamadı. Dosya biçimi tarayıcıda desteklenmiyor olabilir (MP4/H.264 ya da WebM önerilir) veya sunucuya ulaşılamıyor.")}
+        onError={(e) => setError(`Video açılamadı (${e.currentTarget.error?.code ?? "?"}). Dosya biçimi tarayıcıda desteklenmiyor olabilir (MP4/H.264 ya da WebM önerilir) veya sunucuya ulaşılamıyor. Ayrıntı: ayarlar → Tanı bilgisi.`)}
       >
         {subUrl ? <track key={subUrl} kind="captions" srcLang="tr" label="Altyazı" src={subUrl} default /> : null}
       </video>
@@ -696,6 +730,23 @@ export default function SalonPlayer({
           {activeCues.map((c, i) => (
             <span key={i} style={{ background: `rgba(0,0,0,${subStyle.bg})` }} dangerouslySetInnerHTML={{ __html: cueHtml(c) }} />
           ))}
+        </div>
+      ) : null}
+
+      {diagOpen ? (
+        <div className="diag-panel" onClick={(e) => e.stopPropagation()}>
+          <pre>{diagText()}</pre>
+          <div className="diag-actions">
+            <button onClick={() => navigator.clipboard?.writeText(diagText()).catch(() => {})}>Kopyala</button>
+            <button
+              onClick={() => {
+                diagOpenRef.current = false;
+                setDiagOpen(false);
+              }}
+            >
+              Kapat
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -736,6 +787,15 @@ export default function SalonPlayer({
                   Uyumlu mod · {h}p (H.264)
                 </button>
               ))}
+              <button
+                onClick={() => {
+                  setMenu(false);
+                  diagOpenRef.current = true;
+                  setDiagOpen(true);
+                }}
+              >
+                Tanı bilgisi…
+              </button>
               <div className="settings-note">Siyah ekran ama ses varsa uyumlu modu aç; sunucu videoyu çevirir, Pi'de yüksek çözünürlük takılabilir.</div>
             </div>
           ) : null}
