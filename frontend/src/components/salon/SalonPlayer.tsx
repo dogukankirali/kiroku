@@ -18,6 +18,8 @@ type Props = {
   audioUrl?: (audioIndex: number, start: number) => string;
   snapStart?: (t: number) => Promise<number>;
   loadSubtitle?: (subIndex: number) => Promise<string>;
+  /** Verilirse ayar menüsünde "Altyazı bul…" çıkar */
+  onFindSubtitles?: () => void;
   title?: string;
   startAt?: number;
   theater: boolean;
@@ -120,6 +122,7 @@ export default function SalonPlayer({
   audioUrl,
   snapStart,
   loadSubtitle,
+  onFindSubtitles,
   title,
   startAt = 0,
   theater,
@@ -529,7 +532,7 @@ export default function SalonPlayer({
 
   const volumeLevel = muted || volume === 0 ? "muted" : volume >= 0.5 ? "high" : "low";
   const progress = total ? Math.min(1, time / total) : 0;
-  const hasMenu = Boolean(tracks && (tracks.audio.length > 1 || tracks.subtitles.some((s) => s.text))) || Boolean(subtitle);
+  const hasMenu = Boolean(tracks && (tracks.audio.length > 1 || tracks.subtitles.some((s) => s.text))) || Boolean(subtitle) || Boolean(onFindSubtitles);
   const subActive = captions && Boolean(subUrl);
   const cls = ["kk-salon", paused && "paused", theater && "theater", fullScreen && "full-screen", pip && "mini-player", subActive && "captions", scrubbing && "scrubbing", idle && "idle", ready && "ready", busy && "busy"]
     .filter(Boolean)
@@ -647,6 +650,16 @@ export default function SalonPlayer({
               ) : null
             )}
             {(tracks?.subtitles ?? []).some((s) => !s.text) ? <div className="settings-note">Resim biçimindeki (PGS/VobSub) altyazılar gösterilemez.</div> : null}
+            {onFindSubtitles ? (
+              <button
+                onClick={() => {
+                  setMenu(false);
+                  onFindSubtitles();
+                }}
+              >
+                Altyazı bul…
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
