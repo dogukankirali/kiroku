@@ -3,13 +3,21 @@
 // Salon oynatıcı: project-v prototipinin React'e taşınmış hâli. Oynat/duraklat, ses, zaman çizgisinde sürükleme,
 // hız, altyazı, mini oynatıcı (resim içinde resim), sinema modu, tam ekran ve klavye kısayolları
 // (boşluk/k, f, t, i, m, c, ←/→ ya da j/l, ↑/↓, 0–9, n/p: sonraki/önceki bölüm).
+// Dosyanın içindeki ses ve altyazı izleri (sunucu ffmpeg ile listeliyorsa) ayar menüsünden seçilir. Tarayıcı çok sesli
+// dosyalarda yalnızca ilk sesi çaldığı için başka bir ses seçilince video aynen, ses AAC'ye çevrilmiş bir akış açılır;
+// bu akışta sarma yeni bir akış başlatır (en yakın anahtar kareden). Ok tuşuyla art arda sarma tek bir sarmaya birleştirilir.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { shiftVtt, type MediaTrack, type MediaTracks } from "../../lib/videoLibrary";
 import "./salon.css";
 
 type Props = {
   src: string;
   subtitle?: string | null;
+  tracks?: MediaTracks | null;
+  audioUrl?: (audioIndex: number, start: number) => string;
+  snapStart?: (t: number) => Promise<number>;
+  loadSubtitle?: (subIndex: number) => Promise<string>;
   title?: string;
   startAt?: number;
   theater: boolean;
@@ -21,6 +29,8 @@ type Props = {
 };
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+const SEEK_GATE_MS = 250;
+const LANG2: Record<string, string> = { jpn: "ja", eng: "en", tur: "tr", ger: "de", deu: "de", fre: "fr", fra: "fr", spa: "es", por: "pt", ita: "it", rus: "ru", kor: "ko", chi: "zh", zho: "zh", ara: "ar", ind: "id", pol: "pl", dut: "nl", nld: "nl", tha: "th", vie: "vi", hin: "hi" };
 const pad = (n: number) => String(n).padStart(2, "0");
 
 export function formatDuration(time: number) {
@@ -29,6 +39,53 @@ export function formatDuration(time: number) {
   const m = Math.floor(time / 60) % 60;
   const h = Math.floor(time / 3600);
   return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+function langName(code: string) {
+  const two = LANG2[code];
+  if (two) {
+    try {
+      const name = new Intl.DisplayNames(["tr"], { type: "language" }).of(two);
+      if (name) return name;
+    } catch {}
+  }
+  return !code || code === "und" ? "Bilinmiyor" : code.toUpperCase();
+}
+function trackLabel(t: MediaTrack) {
+  const lang = langName(t.lang);
+  const extra = t.title && t.title.toLowerCase() !== lang.toLowerCase() ? ` · ${t.title}` : "";
+  return `${lang}${extra}${t.forced ? " (zorunlu)" : ""}`;
+}
+
+type SubSel = { kind: "off" } | { kind: "external" } | { kind: "embedded"; index: number };
+type Prefs = { volume?: number; captions?: boolean; audioLang?: string; subLang?: string };
+
+function readPrefs(): Prefs {
+  try {
+    return JSON.parse(localStorage.getItem("kirokuSalon") ?? "{}") as Prefs;
+  } catch {
+    return {};
+  }
+}
+/** The audio track the browser plays by itself (default flag, else the first) */
+const nativeAudio = (tracks?: MediaTracks | null) => tracks?.audio.find((a) => a.default) ?? tracks?.audio[0];
+
+function initialAudio(tracks: MediaTracks | null | undefined, prefs: Prefs): number | null {
+  const native = nativeAudio(tracks);
+  if (!tracks || !native || !prefs.audioLang) return null;
+  const wanted = tracks.audio.find((a) => a.lang === prefs.audioLang);
+  return wanted && wanted.index !== native.index ? wanted.index : null;
+}
+function initialSub(tracks: MediaTracks | null | undefined, hasExternal: boolean, prefs: Prefs): SubSel {
+  if (prefs.subLang === "off") return { kind: "off" };
+  const lang = prefs.subLang ?? "tur";
+  const texts = (tracks?.subtitles ?? []).filter((t) => t.text);
+  const full = (t: MediaTrack) => !t.forced && !/sign|song|şarkı/i.test(t.title);
+  const wanted = texts.find((t) => t.lang === lang && full(t)) ?? texts.find((t) => t.lang === lang);
+  if (wanted) return { kind: "embedded", index: wanted.index };
+  if (hasExternal) return { kind: "external" };
+  const fallback = texts.find((t) => t.default && full(t));
+  return fallback ? { kind: "embedded", index: fallback.index } : { kind: "off" };
 }
 
 const Icon = ({ d }: { d: string }) => (
@@ -52,9 +109,26 @@ const ICONS = {
   close: "M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z",
   prev: "M6 6h2v12H6zm3.5 6l8.5 6V6z",
   next: "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z",
+  settings:
+    "M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65A.488.488 0 0 0 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z",
 };
 
-export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater, onTheaterChange, onProgress, onEnded, onPrev, onNext }: Props) {
+export default function SalonPlayer({
+  src,
+  subtitle,
+  tracks,
+  audioUrl,
+  snapStart,
+  loadSubtitle,
+  title,
+  startAt = 0,
+  theater,
+  onTheaterChange,
+  onProgress,
+  onEnded,
+  onPrev,
+  onNext,
+}: Props) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
@@ -62,7 +136,7 @@ export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [time, setTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(tracks?.duration ?? 0);
   const [buffered, setBuffered] = useState(0);
   const [preview, setPreview] = useState(0);
   const [scrubbing, setScrubbing] = useState(false);
@@ -72,25 +146,55 @@ export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater
   const [speed, setSpeed] = useState(1);
   const [idle, setIdle] = useState(false);
   const [skip, setSkip] = useState<{ total: number; key: number } | null>(null);
+  const [flash, setFlash] = useState<{ key: number; icon: "play" | "pause" } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [menu, setMenu] = useState(false);
   const [error, setError] = useState("");
+
+  // Ses izi: null = tarayıcının kendiliğinden çaldığı iz; sayı = o izle açılan akış (base: akışın başladığı saniye)
+  const [audio, setAudio] = useState<number | null>(() => initialAudio(tracks, readPrefs()));
+  const [base, setBase] = useState<number | null>(() => (initialAudio(tracks, readPrefs()) === null ? 0 : null));
+  const [subSel, setSubSel] = useState<SubSel>(() => initialSub(tracks, Boolean(subtitle), readPrefs()));
+  const [subUrl, setSubUrl] = useState<string | null>(null);
+  const audioRef = useRef(audio);
+  const baseRef = useRef(base);
+  audioRef.current = audio;
+  baseRef.current = base;
+  const streaming = audio !== null;
+  const total = streaming ? tracks?.duration || duration : duration;
+
   const wasPaused = useRef(true);
+  const keepPaused = useRef(false);
+  const resumeAt = useRef(startAt);
+  const switchToken = useRef(0);
+  const pendingSeek = useRef<number | null>(null);
+  const seekGate = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const cursor = useRef<number | null>(null);
+  const cursorTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const skipTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const video = () => videoRef.current;
+  /** Videonun içeriğindeki gerçek konum (akışta akışın başlangıcı eklenir) */
+  const clock = useCallback(() => (audioRef.current !== null ? (baseRef.current ?? 0) : 0) + (videoRef.current?.currentTime ?? 0), []);
+  const totalRef = useRef(total);
+  totalRef.current = total;
 
-  // Ses ve hız tercihleri tarayıcıda hatırlanır
-  useEffect(() => {
+  const savePrefs = (patch: Partial<Prefs>) => {
     try {
-      const saved = JSON.parse(localStorage.getItem("kirokuSalon") ?? "{}");
-      if (typeof saved.volume === "number") setVolume(saved.volume);
-      if (typeof saved.captions === "boolean") setCaptions(saved.captions);
+      localStorage.setItem("kirokuSalon", JSON.stringify({ ...readPrefs(), ...patch }));
     } catch {}
+  };
+
+  // Ses ve altyazı tercihleri tarayıcıda hatırlanır
+  useEffect(() => {
+    const saved = readPrefs();
+    if (typeof saved.volume === "number") setVolume(saved.volume);
+    if (typeof saved.captions === "boolean") setCaptions(saved.captions);
   }, []);
   useEffect(() => {
-    try {
-      localStorage.setItem("kirokuSalon", JSON.stringify({ volume, captions }));
-    } catch {}
+    savePrefs({ volume, captions });
     const v = video();
     if (v) v.volume = volume;
   }, [volume, captions]);
@@ -100,23 +204,71 @@ export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater
     if (v) v.muted = muted;
   }, [muted]);
 
-  // Kaynak değişince sıfırla; kaldığı yerden devam et
+  // Kaynak değişince sıfırla
   useEffect(() => {
     setError("");
     setTime(0);
-    setDuration(0);
     setBuffered(0);
-  }, [src]);
+    setReady(false);
+    if (!tracks) setDuration(0);
+  }, [src, tracks]);
+
+  // Açılışta seçili ses izi kaynak videodan farklıysa akışı, kalınan yerin anahtar karesinden başlat
+  useEffect(() => {
+    if (audioRef.current === null || baseRef.current !== null) return;
+    let alive = true;
+    (snapStart ? snapStart(startAt) : Promise.resolve(startAt)).then((b) => {
+      if (!alive) return;
+      setBase(b);
+      setTime(b);
+    });
+    return () => {
+      alive = false;
+    };
+    // yalnızca ilk açılışta
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Seçili altyazı izinin adresi (dışarıdaki dosya, ya da dosyanın içinden çıkarılmış). Akış videonun ortasından başladığında
+  // oynatıcı saati 0'dan saydığı için altyazı zamanları akışın başlangıcı kadar öne çekilir.
+  const subTexts = useRef(new Map<string, string>());
+  const loadSubtitleRef = useRef(loadSubtitle);
+  loadSubtitleRef.current = loadSubtitle;
+  const shift = audio !== null ? (base ?? 0) : 0;
+  useEffect(() => {
+    if (subSel.kind === "off") return setSubUrl(null);
+    let alive = true;
+    let url: string | null = null;
+    const cacheKey = subSel.kind === "external" ? `x:${subtitle}` : `e:${subSel.index}`;
+    (async () => {
+      let text = subTexts.current.get(cacheKey);
+      if (text === undefined) {
+        if (subSel.kind === "external") text = subtitle ? await (await fetch(subtitle)).text() : "";
+        else text = loadSubtitleRef.current ? await loadSubtitleRef.current(subSel.index) : "";
+        subTexts.current.set(cacheKey, text);
+      }
+      if (!alive) return;
+      if (!text) return setSubUrl(null);
+      url = URL.createObjectURL(new Blob([shiftVtt(text, shift)], { type: "text/vtt" }));
+      setSubUrl(url);
+    })().catch(() => alive && setSubUrl(null));
+    return () => {
+      alive = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [subSel, subtitle, shift]);
 
   useEffect(() => {
     const v = video();
     const track = v?.textTracks[0];
-    if (track) track.mode = captions ? "showing" : "hidden";
-  }, [captions, subtitle]);
+    if (track) track.mode = captions && subUrl ? "showing" : "hidden";
+  }, [captions, subUrl]);
 
   const togglePlay = useCallback(() => {
     const v = video();
     if (!v) return;
+    setMenu(false);
+    setFlash({ key: Date.now(), icon: v.paused ? "play" : "pause" });
     if (v.paused) v.play().catch(() => {});
     else v.pause();
   }, []);
@@ -133,14 +285,61 @@ export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater
     else v.requestPictureInPicture?.().catch(() => {});
   }, []);
 
-  const skipBy = useCallback((seconds: number) => {
-    const v = video();
-    if (!v) return;
-    v.currentTime = Math.min(Math.max(0, v.currentTime + seconds), v.duration || Infinity);
-    setSkip((prev) => ({ total: (prev && Math.sign(prev.total) === Math.sign(seconds) ? prev.total : 0) + seconds, key: Date.now() }));
-    clearTimeout(skipTimer.current);
-    skipTimer.current = setTimeout(() => setSkip(null), 650);
-  }, []);
+  /** Videonun içeriğinde t. saniyeye git (akışta: o saniyenin anahtar karesinden yeni akış) */
+  const seekTo = useCallback(
+    (t: number, stayPaused?: boolean) => {
+      const v = video();
+      if (!v) return;
+      const target = Math.min(Math.max(0, t), totalRef.current > 1 ? totalRef.current - 0.1 : Infinity);
+      if (audioRef.current === null) {
+        v.currentTime = target;
+        return;
+      }
+      keepPaused.current = stayPaused ?? v.paused;
+      const token = ++switchToken.current;
+      setBusy(true);
+      (snapStart ? snapStart(target) : Promise.resolve(target)).then((b) => {
+        if (token !== switchToken.current) return;
+        setBase(b);
+        setTime(b);
+      });
+    },
+    [snapStart]
+  );
+
+  /** Art arda gelen sarmalar (ok tuşu basılı tutulunca) birleştirilir: ilki hemen, sonrakiler en fazla SEEK_GATE_MS'de bir uygulanır */
+  const requestSeek = useCallback(
+    (t: number, stayPaused?: boolean) => {
+      const target = Math.min(Math.max(0, t), totalRef.current || Infinity);
+      cursor.current = target;
+      clearTimeout(cursorTimer.current);
+      cursorTimer.current = setTimeout(() => (cursor.current = null), 800);
+      setTime(target);
+      if (seekGate.current) {
+        pendingSeek.current = target;
+        return;
+      }
+      seekTo(target, stayPaused);
+      seekGate.current = setTimeout(() => {
+        seekGate.current = undefined;
+        const queued = pendingSeek.current;
+        pendingSeek.current = null;
+        if (queued !== null) requestSeek(queued, stayPaused);
+      }, SEEK_GATE_MS);
+    },
+    [seekTo]
+  );
+
+  const skipBy = useCallback(
+    (seconds: number) => {
+      if (!videoRef.current) return;
+      requestSeek((pendingSeek.current ?? cursor.current ?? clock()) + seconds);
+      setSkip((prev) => ({ total: (prev && Math.sign(prev.total) === Math.sign(seconds) ? prev.total : 0) + seconds, key: Date.now() }));
+      clearTimeout(skipTimer.current);
+      skipTimer.current = setTimeout(() => setSkip(null), 650);
+    },
+    [requestSeek, clock]
+  );
 
   const changeSpeed = useCallback((dir = 1) => {
     const v = video();
@@ -156,6 +355,44 @@ export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater
     clearTimeout(idleTimer.current);
     idleTimer.current = setTimeout(() => setIdle(true), 2500);
   }, []);
+
+  const chooseAudio = (index: number) => {
+    const native = nativeAudio(tracks);
+    const t = clock();
+    const track = tracks?.audio.find((a) => a.index === index);
+    if (track) savePrefs({ audioLang: track.lang });
+    setMenu(false);
+    const v = video();
+    keepPaused.current = v?.paused ?? false;
+    const token = ++switchToken.current;
+    if (!native || index === native.index) {
+      if (audioRef.current === null) return;
+      resumeAt.current = t;
+      setAudio(null);
+      setBase(0);
+      setBusy(true);
+      return;
+    }
+    if (audioRef.current === index) return;
+    setBusy(true);
+    setAudio(index);
+    (snapStart ? snapStart(t) : Promise.resolve(t)).then((b) => {
+      if (token !== switchToken.current) return;
+      setBase(b);
+      setTime(b);
+    });
+  };
+
+  const chooseSub = (sel: SubSel) => {
+    setSubSel(sel);
+    setCaptions(sel.kind !== "off");
+    if (sel.kind === "off") savePrefs({ subLang: "off" });
+    else if (sel.kind === "embedded") {
+      const track = tracks?.subtitles.find((s) => s.index === sel.index);
+      if (track) savePrefs({ subLang: track.lang });
+    }
+    setMenu(false);
+  };
 
   // Klavye kısayolları (yazı alanlarında devre dışı)
   useEffect(() => {
@@ -188,6 +425,10 @@ export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater
         case "c":
           setCaptions((c) => !c);
           break;
+        case "escape":
+          if (!menu) return;
+          setMenu(false);
+          break;
         case "arrowleft":
         case "j":
           skipBy(key === "j" ? -10 : -5);
@@ -218,7 +459,7 @@ export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater
           onPrev();
           break;
         default:
-          if (/^[0-9]$/.test(key) && v.duration) v.currentTime = (v.duration / 10) * Number(key);
+          if (/^[0-9]$/.test(key) && totalRef.current) requestSeek((totalRef.current / 10) * Number(key));
           else handled = false;
       }
       if (handled) {
@@ -228,7 +469,7 @@ export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [togglePlay, toggleFullScreen, togglePip, skipBy, changeSpeed, onTheaterChange, theater, onNext, onPrev, wake]);
+  }, [togglePlay, toggleFullScreen, togglePip, skipBy, requestSeek, changeSpeed, onTheaterChange, theater, onNext, onPrev, wake, menu]);
 
   useEffect(() => {
     const v = video();
@@ -250,6 +491,8 @@ export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater
       document.removeEventListener("fullscreenchange", onFs);
       clearTimeout(idleTimer.current);
       clearTimeout(skipTimer.current);
+      clearTimeout(seekGate.current);
+      clearTimeout(cursorTimer.current);
     };
   }, []);
 
@@ -263,15 +506,17 @@ export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater
     const move = (e: MouseEvent) => {
       const p = percentAt(e.clientX);
       setPreview(p);
-      const v = video();
-      if (v?.duration) setTime(p * v.duration);
+      if (totalRef.current) setTime(p * totalRef.current);
     };
     const up = (e: MouseEvent) => {
-      const v = video();
       setScrubbing(false);
-      if (!v?.duration) return;
-      v.currentTime = percentAt(e.clientX) * v.duration;
-      if (!wasPaused.current) v.play().catch(() => {});
+      if (!totalRef.current) return;
+      const t = percentAt(e.clientX) * totalRef.current;
+      const v = video();
+      if (audioRef.current === null) {
+        if (v) v.currentTime = t;
+        if (!wasPaused.current) v?.play().catch(() => {});
+      } else seekTo(t, wasPaused.current);
     };
     document.addEventListener("mousemove", move);
     document.addEventListener("mouseup", up);
@@ -279,42 +524,64 @@ export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater
       document.removeEventListener("mousemove", move);
       document.removeEventListener("mouseup", up);
     };
-  }, [scrubbing]);
+  }, [scrubbing, seekTo]);
 
   const volumeLevel = muted || volume === 0 ? "muted" : volume >= 0.5 ? "high" : "low";
-  const progress = duration ? time / duration : 0;
-  const cls = ["kk-salon", paused && "paused", theater && "theater", fullScreen && "full-screen", pip && "mini-player", captions && subtitle && "captions", scrubbing && "scrubbing", idle && "idle"]
+  const progress = total ? Math.min(1, time / total) : 0;
+  const hasMenu = Boolean(tracks && (tracks.audio.length > 1 || tracks.subtitles.some((s) => s.text))) || Boolean(subtitle);
+  const subActive = captions && Boolean(subUrl);
+  const cls = ["kk-salon", paused && "paused", theater && "theater", fullScreen && "full-screen", pip && "mini-player", subActive && "captions", scrubbing && "scrubbing", idle && "idle", ready && "ready", busy && "busy"]
     .filter(Boolean)
     .join(" ");
+  const videoSrc = audio === null ? src : base === null ? undefined : (audioUrl?.(audio, base) ?? src);
+  const nativeTrack = nativeAudio(tracks);
+  const activeAudio = audio ?? nativeTrack?.index;
 
   return (
     <div ref={rootRef} className={cls} tabIndex={-1} onMouseMove={wake} onMouseLeave={() => setIdle(true)}>
       <video
         ref={videoRef}
-        src={src}
+        src={videoSrc}
         autoPlay
+        preload="auto"
         playsInline
         onClick={togglePlay}
         onDoubleClick={toggleFullScreen}
         onPlay={() => setPaused(false)}
         onPause={() => setPaused(true)}
+        onLoadStart={() => setBusy(true)}
+        onWaiting={() => setBusy(true)}
+        onSeeking={() => setBusy(true)}
+        onSeeked={() => setBusy(false)}
+        onCanPlay={() => setBusy(false)}
+        onPlaying={() => setBusy(false)}
+        onLoadedData={() => setReady(true)}
         onLoadedMetadata={(e) => {
           const v = e.currentTarget;
-          setDuration(v.duration);
+          setDuration(audioRef.current !== null ? tracks?.duration || 0 : v.duration);
           v.volume = volume;
           v.playbackRate = speed;
-          if (startAt > 5 && startAt < v.duration - 10) v.currentTime = startAt;
+          if (audioRef.current === null) {
+            const at = resumeAt.current;
+            resumeAt.current = 0;
+            if (at > 5 && at < v.duration - 10) v.currentTime = at;
+          }
+          if (keepPaused.current) {
+            keepPaused.current = false;
+            v.pause();
+          }
           const track = v.textTracks[0];
-          if (track) track.mode = captions ? "showing" : "hidden";
+          if (track) track.mode = captions && subUrl ? "showing" : "hidden";
         }}
         onTimeUpdate={(e) => {
           const v = e.currentTarget;
-          if (!scrubbing) setTime(v.currentTime);
-          onProgress?.(v.currentTime, v.duration);
+          const now = (audioRef.current !== null ? (baseRef.current ?? 0) : 0) + v.currentTime;
+          if (!scrubbing && pendingSeek.current === null) setTime(now);
+          onProgress?.(now, totalRef.current);
         }}
         onProgress={(e) => {
           const v = e.currentTarget;
-          if (v.duration && v.buffered.length) setBuffered(v.buffered.end(v.buffered.length - 1) / v.duration);
+          if (audioRef.current === null && v.duration && v.buffered.length) setBuffered(v.buffered.end(v.buffered.length - 1) / v.duration);
         }}
         onVolumeChange={(e) => {
           setMuted(e.currentTarget.muted);
@@ -322,15 +589,56 @@ export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater
         onEnded={onEnded}
         onError={() => setError("Video açılamadı. Dosya biçimi tarayıcıda desteklenmiyor olabilir (MP4/H.264 ya da WebM önerilir) veya sunucuya ulaşılamıyor.")}
       >
-        {subtitle ? <track kind="captions" srcLang="tr" label="Altyazı" src={subtitle} default /> : null}
+        {subUrl ? <track key={subUrl} kind="captions" srcLang="tr" label="Altyazı" src={subUrl} default /> : null}
       </video>
 
+      {busy && !error ? <div className="spinner" aria-label="Yükleniyor" /> : null}
+      {flash ? (
+        <div key={flash.key} className="center-flash" aria-hidden>
+          <Icon d={ICONS[flash.icon]} />
+        </div>
+      ) : null}
       {skip ? (
         <div key={skip.key} className={`skip-badge ${skip.total > 0 ? "forward" : "back"}`}>
           {skip.total > 0 ? `+${skip.total}` : skip.total} sn
         </div>
       ) : null}
       {error ? <div className="center-msg">{error}</div> : null}
+
+      {menu ? (
+        <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
+          {tracks && tracks.audio.length > 1 ? (
+            <div className="settings-group">
+              <div className="settings-title">Ses</div>
+              {tracks.audio.map((a) => (
+                <button key={a.index} className={a.index === activeAudio ? "active" : ""} onClick={() => chooseAudio(a.index)}>
+                  {trackLabel(a)}
+                </button>
+              ))}
+              {audio !== null ? <div className="settings-note">Bu ses için video yeniden akıtılıyor; sarma birkaç saniye geriden başlayabilir.</div> : null}
+            </div>
+          ) : null}
+          <div className="settings-group">
+            <div className="settings-title">Altyazı</div>
+            <button className={!subActive ? "active" : ""} onClick={() => chooseSub({ kind: "off" })}>
+              Kapalı
+            </button>
+            {subtitle ? (
+              <button className={subActive && subSel.kind === "external" ? "active" : ""} onClick={() => chooseSub({ kind: "external" })}>
+                Dosyanın yanındaki altyazı
+              </button>
+            ) : null}
+            {(tracks?.subtitles ?? []).map((s) =>
+              s.text ? (
+                <button key={s.index} className={subActive && subSel.kind === "embedded" && subSel.index === s.index ? "active" : ""} onClick={() => chooseSub({ kind: "embedded", index: s.index })}>
+                  {trackLabel(s)}
+                </button>
+              ) : null
+            )}
+            {(tracks?.subtitles ?? []).some((s) => !s.text) ? <div className="settings-note">Resim biçimindeki (PGS/VobSub) altyazılar gösterilemez.</div> : null}
+          </div>
+        </div>
+      ) : null}
 
       <div className="controls-wrap">
         <div
@@ -341,7 +649,7 @@ export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater
             if (e.button !== 0) return;
             const v = video();
             wasPaused.current = v?.paused ?? true;
-            v?.pause();
+            if (audioRef.current === null) v?.pause();
             setPreview(percentAt(e.clientX));
             setScrubbing(true);
           }}
@@ -349,7 +657,7 @@ export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater
         >
           <div className="timeline">
             <div className="buffered" />
-            <div className="preview-time">{formatDuration(preview * duration)}</div>
+            <div className="preview-time">{formatDuration(preview * total)}</div>
             <div className="thumb-indicator" />
           </div>
         </div>
@@ -387,12 +695,17 @@ export default function SalonPlayer({ src, subtitle, title, startAt = 0, theater
             />
           </div>
           <div className="duration">
-            <span>{formatDuration(time)}</span>/<span>{formatDuration(duration)}</span>
+            <span>{formatDuration(time)}</span>/<span>{formatDuration(total)}</span>
             {title ? <span className="title">{title}</span> : null}
           </div>
-          {subtitle ? (
-            <button className="captions-btn" onClick={() => setCaptions((c) => !c)} title="Altyazı (c)">
+          {subUrl || subtitle || tracks?.subtitles.some((s) => s.text) ? (
+            <button className="captions-btn" onClick={() => setCaptions((c) => !c)} title="Altyazıyı aç/kapat (c)">
               <Icon d={ICONS.captions} />
+            </button>
+          ) : null}
+          {hasMenu ? (
+            <button className={menu ? "menu-open" : ""} onClick={() => setMenu((m) => !m)} title="Ses ve altyazı seç">
+              <Icon d={ICONS.settings} />
             </button>
           ) : null}
           <button className="wide-btn" onClick={() => changeSpeed(1)} onContextMenu={(e) => (e.preventDefault(), changeSpeed(-1))} title="Oynatma hızı (< / >)">

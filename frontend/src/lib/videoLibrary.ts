@@ -8,6 +8,9 @@
 export type VideoLibraryConfig = { kind: "http" | "local"; url: string; key: string };
 export type VideoEntry = { name: string; isDir: boolean };
 export type Episode = { file: string; number: number; label: string; subtitle?: string };
+/** An audio or subtitle stream inside a video file; `index` counts within its own kind (ffmpeg's 0:a:n / 0:s:n) */
+export type MediaTrack = { index: number; lang: string; title: string; codec: string; default: boolean; forced: boolean; text?: boolean };
+export type MediaTracks = { duration: number; audio: MediaTrack[]; subtitles: MediaTrack[] };
 
 const KEY = "kirokuVideoLibrary";
 const FOLDERS_KEY = "kirokuSalonFolders";
@@ -65,10 +68,14 @@ async function localFile(path: string): Promise<File> {
 
 // ---- HTTP ----
 
-function httpUrl(cfg: VideoLibraryConfig, path: string, dir = false) {
+function httpUrl(cfg: VideoLibraryConfig, path: string, dir = false, extra: Record<string, string | number> = {}) {
   const rel = path.split("/").filter(Boolean).map(encodeURIComponent).join("/");
   const base = `${cfg.url.replace(/\/+$/, "")}/${rel}${dir && rel ? "/" : ""}`;
-  return cfg.key ? `${base}?key=${encodeURIComponent(cfg.key)}` : base;
+  const query = new URLSearchParams();
+  if (cfg.key) query.set("key", cfg.key);
+  for (const [k, v] of Object.entries(extra)) query.set(k, String(v));
+  const qs = query.toString();
+  return qs ? `${base}?${qs}` : base;
 }
 
 async function listHttp(cfg: VideoLibraryConfig, path: string): Promise<VideoEntry[]> {
@@ -133,6 +140,85 @@ export async function subtitleUrl(path: string): Promise<{ url: string; revoke: 
   const vtt = /\.srt$/i.test(path) ? srtToVtt(text) : text;
   const url = URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));
   return { url, revoke: () => URL.revokeObjectURL(url) };
+}
+
+// ---- Tracks inside the video file (needs scripts/manga-library.mjs with ffmpeg; local folders and plain file servers have none) ----
+
+/** Audio and subtitle streams of a file, or null when the server cannot list them */
+export async function fetchTracks(path: string): Promise<MediaTracks | null> {
+  const cfg = loadVideoLibrary();
+  if (useLocal(cfg) || !cfg.url) return null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const res = await fetch(httpUrl(cfg, path, false, { tracks: 1 }), { credentials: "omit", signal: ctrl.signal });
+    // A server without ffmpeg ignores ?tracks and would stream the whole video: only read JSON answers
+    if (!res.ok || !(res.headers.get("content-type") ?? "").includes("json")) {
+      ctrl.abort();
+      return null;
+    }
+    const data = (await res.json()) as Partial<MediaTracks> | null;
+    return data && Array.isArray(data.audio) && Array.isArray(data.subtitles) ? { duration: Number(data.duration) || 0, audio: data.audio, subtitles: data.subtitles } : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** MP4 stream of the file with one chosen audio track, starting at `start` seconds (video is copied, audio becomes AAC) */
+export function audioStreamUrl(path: string, audioIndex: number, start: number) {
+  return httpUrl(loadVideoLibrary(), path, false, { audio: audioIndex, start: Math.max(0, start) });
+}
+
+/** Where a stream asked to start at `t` really starts: the closest keyframe before it, so subtitles stay in sync */
+export async function keyframeBefore(path: string, t: number): Promise<number> {
+  if (t <= 0) return 0;
+  try {
+    const res = await fetch(httpUrl(loadVideoLibrary(), path, false, { keyframe: t }), { credentials: "omit" });
+    const data = (await res.json()) as { start?: number };
+    return res.ok && Number.isFinite(data.start) ? Number(data.start) : t;
+  } catch {
+    return t;
+  }
+}
+
+/** An embedded text subtitle track as WebVTT text */
+export async function embeddedSubtitleText(path: string, subIndex: number): Promise<string> {
+  const res = await fetch(httpUrl(loadVideoLibrary(), path, false, { sub: subIndex }), { credentials: "omit" });
+  if (!res.ok) throw new VideoLibraryError(`Altyazı açılamadı (${res.status})`, "missing");
+  return res.text();
+}
+
+/** WebVTT text with every cue moved `seconds` earlier (cues that end before 0 are dropped): subtitles for a stream that starts mid-file */
+export function shiftVtt(vtt: string, seconds: number): string {
+  if (!seconds) return vtt;
+  const parse = (t: string) => {
+    const parts = t.split(":").map(Number);
+    return parts.length === 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : parts[0] * 60 + parts[1];
+  };
+  const fmt = (t: number) => {
+    const ms = Math.round(Math.max(0, t) * 1000);
+    const pad = (n: number, w = 2) => String(n).padStart(w, "0");
+    return `${pad(Math.floor(ms / 3600000))}:${pad(Math.floor(ms / 60000) % 60)}:${pad(Math.floor(ms / 1000) % 60)}.${pad(ms % 1000, 3)}`;
+  };
+  const stamp = /^((?:\d+:)?\d{1,2}:\d{2}\.\d{3})\s+-->\s+((?:\d+:)?\d{1,2}:\d{2}\.\d{3})(.*)$/;
+  const blocks = vtt.replace(/\r/g, "").split(/\n{2,}/);
+  const out: string[] = [];
+  for (const block of blocks) {
+    const lines = block.split("\n");
+    const at = lines.findIndex((l) => stamp.test(l));
+    if (at < 0) {
+      out.push(block);
+      continue;
+    }
+    const m = stamp.exec(lines[at])!;
+    const end = parse(m[2]) - seconds;
+    if (end <= 0) continue;
+    lines[at] = `${fmt(parse(m[1]) - seconds)} --> ${fmt(end)}${m[3]}`;
+    out.push(lines.join("\n"));
+  }
+  return out.join("\n\n");
 }
 
 export function srtToVtt(srt: string) {
