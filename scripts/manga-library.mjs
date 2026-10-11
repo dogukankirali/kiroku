@@ -207,7 +207,10 @@ async function searchSubtitles({ provider, q, lang, season, episode }) {
     const data = await getJson(url);
     const wanted = LANG_NAMES[lang];
     const epNum = Number(episode) || 0;
-    const rows = (data.data ?? [])
+    // The list may sit at data, data.data, data.data.data (paginator) or data.subtitles
+    const list = [data, data.data, data.data?.data, data.subtitles, data.data?.subtitles, data.data?.items, data.items].find(Array.isArray);
+    if (!list) throw new Error(`AniSub yanıt şekli beklenmedik: ${JSON.stringify(data).slice(0, 300)}`);
+    const rows = list
       .filter((a) => !wanted || String(a.subtitle_language ?? "").toLocaleLowerCase("tr") === wanted)
       .map((a) => {
         const n = Number(/(\d+)/.exec(a.content_type ?? "")?.[1] ?? 0);
@@ -272,8 +275,8 @@ async function downloadSubtitle({ provider, id, episode }) {
   return { bytes: Buffer.from(await res.arrayBuffer()), name: "" };
 }
 
-/** Zip içindeki ilk altyazı dosyası { name, bytes } (yalnızca saklı/deflate girdiler) */
-function firstSubtitleInZip(buf) {
+/** Zip içindeki altyazı dosyası { name, bytes }: bölüm numarası eşleşen, yoksa ilk (yalnızca saklı/deflate girdiler) */
+function firstSubtitleInZip(buf, episode = 0) {
   let end = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) {
     if (buf.readUInt32LE(i) === 0x06054b50) {
@@ -284,6 +287,8 @@ function firstSubtitleInZip(buf) {
   if (end < 0) return null;
   const count = buf.readUInt16LE(end + 10);
   let pos = buf.readUInt32LE(end + 16);
+  let first = null;
+  const epRe = Number(episode) > 0 ? new RegExp(`(?<![0-9])0*${Number(episode)}(?![0-9])`) : null;
   for (let n = 0; n < count && buf.readUInt32LE(pos) === 0x02014b50; n++) {
     const method = buf.readUInt16LE(pos + 10);
     const compressed = buf.readUInt32LE(pos + 20);
@@ -296,9 +301,12 @@ function firstSubtitleInZip(buf) {
     if (!/\.(srt|ass|ssa|vtt|sub)$/i.test(name)) continue;
     const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
     const data = buf.subarray(start, start + compressed);
-    return { name, bytes: method === 0 ? data : method === 8 ? inflateRawSync(data) : null };
+    const found = { name, bytes: method === 0 ? data : method === 8 ? inflateRawSync(data) : null };
+    // Paket zip'lerde (tüm bölümler) adında bölüm numarası geçen dosyayı seç
+    if (epRe && epRe.test(name.replace(/\.[^.]+$/, "").replace(/(?:480|720|1080|2160)p|x26[45]|\[[0-9a-f]{8}\]/gi, ""))) return found;
+    first ??= found;
   }
-  return null;
+  return first;
 }
 
 /** Metin altyazıyı UTF-8'e çevirir (Türkçe altyazılar çoğu zaman Windows-1254'tür) */
@@ -339,7 +347,7 @@ async function saveSubtitle({ provider, id, lang, file, episode }) {
   await stat(video);
   const got = await downloadSubtitle({ provider, id, episode });
   const isRar = got.bytes.subarray(0, 4).toString("latin1") === "Rar!";
-  const entry = got.bytes[0] === 0x50 && got.bytes[1] === 0x4b ? firstSubtitleInZip(got.bytes) : isRar ? await firstSubtitleInRar(got.bytes) : { name: got.name, bytes: got.bytes };
+  const entry = got.bytes[0] === 0x50 && got.bytes[1] === 0x4b ? firstSubtitleInZip(got.bytes, episode) : isRar ? await firstSubtitleInRar(got.bytes) : { name: got.name, bytes: got.bytes };
   if (!entry?.bytes) throw new Error("indirilen dosyada altyazı bulunamadı");
   let ext = extname(entry.name).toLowerCase();
   ext = [".srt", ".ass", ".ssa", ".vtt"].includes(ext) ? ext : ".srt";
