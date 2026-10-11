@@ -19,8 +19,13 @@ import SalonPlayer from "../../components/salon/SalonPlayer";
 import {
   Episode,
   VideoLibraryConfig,
+  MediaTracks,
   VideoLibraryError,
+  audioStreamUrl,
   canPickFolder,
+  embeddedSubtitleText,
+  fetchTracks,
+  keyframeBefore,
   listEpisodes,
   listVideoLibrary,
   loadVideoLibrary,
@@ -63,7 +68,7 @@ function LibrarySettings({ error, onSaved }: { error?: string; onSaved: () => vo
       <Typography sx={{ fontWeight: 700 }}>Video kütüphanesi</Typography>
       <Typography sx={{ fontSize: "0.85rem", color: palette.textMuted }}>
         Salon bölümleri kendi kütüphanenden açar; Kiroku yalnızca ilerlemeyi tutar. Her anime için bir klasör, içinde bölüm dosyaları (MP4/WebM, isteğe bağlı aynı adlı
-        .vtt/.srt altyazı) olmalı. Bu ayar yalnızca bu tarayıcıda saklanır.
+        .vtt/.srt altyazı) olmalı. Sunucuda ffmpeg varsa dosyanın içindeki ses ve altyazı dilleri de oynatıcıdaki ayar menüsünden seçilir. Bu ayar yalnızca bu tarayıcıda saklanır.
       </Typography>
       {error ? (
         <Alert severity="warning" sx={{ borderRadius: "12px" }}>
@@ -128,7 +133,7 @@ function Salon() {
   const [libError, setLibError] = useState<VideoLibraryError | null>(null);
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
-  const [media, setMedia] = useState<{ src: string; sub: string | null } | null>(null);
+  const [media, setMedia] = useState<{ src: string; sub: string | null; tracks: MediaTracks | null } | null>(null);
   const [theater, setTheater] = useState(false);
   const [toast, setToast] = useState("");
   const [folderQuery, setFolderQuery] = useState("");
@@ -209,7 +214,9 @@ function Salon() {
             sub = s.url;
           }
         }
-        if (alive) setMedia({ src: v.url, sub });
+        // Dosyanın içindeki ses/altyazı izleri (yalnızca ffmpeg'li sunucuda); yoksa oynatıcı yalnızca dosyanın kendi sesini çalar
+        const tracks = await fetchTracks(current.file);
+        if (alive) setMedia({ src: v.url, sub, tracks });
       } catch (e) {
         if (alive) setLibError(e instanceof VideoLibraryError ? e : new VideoLibraryError(String((e as Error)?.message ?? e), "missing"));
       }
@@ -219,6 +226,8 @@ function Salon() {
       revokers.forEach((r) => r());
     };
   }, [current]);
+
+  const loadEmbeddedSubtitle = useCallback((index: number) => embeddedSubtitleText(current?.file ?? "", index), [current]);
 
   const markWatched = useCallback(
     async (ep: Episode) => {
@@ -327,6 +336,10 @@ function Salon() {
                 key={current.file}
                 src={media.src}
                 subtitle={media.sub}
+                tracks={media.tracks}
+                audioUrl={(index, start) => audioStreamUrl(current.file, index, start)}
+                snapStart={(t) => keyframeBefore(current.file, t)}
+                loadSubtitle={loadEmbeddedSubtitle}
                 title={`${String(anime.Name)} · ${current.label}`}
                 startAt={readPos(posKey(id, current.file))}
                 theater={theater}

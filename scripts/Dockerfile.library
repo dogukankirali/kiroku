@@ -1,0 +1,7 @@
+# manga-library.mjs with ffmpeg, for Salon's audio and subtitle track selection (build from this folder):
+#   docker build -f Dockerfile.library -t kiroku-library .
+#   docker run -d --name kiroku-lib --restart unless-stopped -p 8789:8789 -v "/path/to/Anime:/anime:ro" kiroku-library /anime --port 8789 --key <key>
+FROM node:20-alpine
+RUN apk add --no-cache ffmpeg
+COPY manga-library.mjs /app/lib.mjs
+ENTRYPOINT ["node", "/app/lib.mjs"]
