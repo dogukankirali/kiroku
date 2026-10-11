@@ -16,10 +16,12 @@ import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 import { AnimeService } from "../../Services/AnimeServices";
 import { palette } from "../../theme/customTheme";
 import SalonPlayer from "../../components/salon/SalonPlayer";
+import SubtitleFinder from "../../components/salon/SubtitleFinder";
 import {
   Episode,
   VideoLibraryConfig,
   MediaTracks,
+  SubtitleInfo,
   VideoLibraryError,
   audioStreamUrl,
   canPickFolder,
@@ -35,6 +37,7 @@ import {
   pickVideoFolder,
   saveFolder,
   saveVideoLibrary,
+  subtitleInfo,
   subtitleUrl,
   videoUrl,
 } from "../../lib/videoLibrary";
@@ -139,6 +142,9 @@ function Salon() {
   const [toast, setToast] = useState("");
   const [folderQuery, setFolderQuery] = useState("");
   const [subDirs, setSubDirs] = useState<string[]>([]);
+  const [subInfo, setSubInfo] = useState<SubtitleInfo | null>(null);
+  const [finderOpen, setFinderOpen] = useState(false);
+  const [epReload, setEpReload] = useState(0);
   const [browsePath, setBrowsePath] = useState("");
   const [browseDirs, setBrowseDirs] = useState<string[] | null>(null);
   const animeRef = useRef<TEATable.IAnime | null>(null);
@@ -206,7 +212,16 @@ function Salon() {
     return () => {
       alive = false;
     };
-  }, [folder]);
+  }, [folder, epReload]);
+
+  // Kütüphane sunucusu altyazı arayıp kaydedebiliyor mu (ffmpeg'li --writable sürüm)
+  useEffect(() => {
+    let alive = true;
+    subtitleInfo().then((info) => alive && setSubInfo(info));
+    return () => {
+      alive = false;
+    };
+  }, [reload]);
 
   // Klasör seçici: kütüphanede iç içe klasörlere inilebilir
   const choosing = Boolean(anime && !libError && folders && !folder);
@@ -411,6 +426,7 @@ function Salon() {
                 audioUrl={(index, start) => audioStreamUrl(current.file, index, start)}
                 snapStart={(t) => keyframeBefore(current.file, t)}
                 loadSubtitle={loadEmbeddedSubtitle}
+                onFindSubtitles={subInfo ? () => setFinderOpen(true) : undefined}
                 title={`${String(anime.Name)} · ${current.label}`}
                 startAt={readPos(posKey(id, current.file))}
                 theater={theater}
@@ -461,6 +477,22 @@ function Salon() {
             </Button>
           </Box>
         </Box>
+      ) : null}
+
+      {subInfo && current ? (
+        <SubtitleFinder
+          open={finderOpen}
+          onClose={() => setFinderOpen(false)}
+          info={subInfo}
+          file={current.file}
+          names={[String(anime?.EnglishName ?? ""), String(anime?.Name ?? "")].filter(Boolean)}
+          episode={current.number}
+          onSaved={(name) => {
+            setFinderOpen(false);
+            setToast(`Altyazı kaydedildi: ${name}`);
+            setEpReload((n) => n + 1);
+          }}
+        />
       ) : null}
 
       <Snackbar open={Boolean(toast)} autoHideDuration={3000} onClose={() => setToast("")} message={toast} anchorOrigin={{ vertical: "bottom", horizontal: "center" }} />

@@ -220,7 +220,10 @@ export default function Sidebar({ collapsed, onToggleCollapsed, onNavigate }: Si
           <Box sx={{ display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "space-between", mt: 1, px: collapsed ? 0 : 0.5 }}>
             {!collapsed && (
               <Tooltip title={process.env.NEXT_PUBLIC_APP_COMMIT ? `Commit ${process.env.NEXT_PUBLIC_APP_COMMIT}` : ""} placement="top">
-                <Typography sx={{ fontSize: "0.7rem", color: palette.textFaint }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "3.0.0"}</Typography>
+                <Typography sx={{ fontSize: "0.7rem", color: palette.textFaint }}>
+                  v{process.env.NEXT_PUBLIC_APP_VERSION ?? "3.0.0"}
+                  {process.env.NEXT_PUBLIC_APP_COMMIT ? ` · ${process.env.NEXT_PUBLIC_APP_COMMIT.slice(0, 7)}` : ""}
+                </Typography>
               </Tooltip>
             )}
             <Tooltip title={collapsed ? "Menüyü genişlet" : "Menüyü daralt"} placement="right">
