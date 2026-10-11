@@ -4,7 +4,7 @@
 import { SOURCES, sourceById } from "./manga/sources.js";
 import { LANGUAGE_MODES, mergeChapters, buildChapterCbz, chapterFileName } from "./manga/downloader.js";
 import { fetchMangaMetadata, seriesJson } from "./manga/metadata.js";
-import { STORAGE_KEY, DEFAULT_STORAGE, createStorage } from "./manga/storage.js";
+import { STORAGE_KEY, DEFAULT_STORAGE, createStorage, testNas } from "./manga/storage.js";
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -64,7 +64,18 @@ const setProgress = (ratio) => ($("progress").firstElementChild.style.width = `$
 let storageSettings = { ...DEFAULT_STORAGE };
 
 function readStorageForm() {
-  return { localDir: $("st-localDir").value.trim() || DEFAULT_STORAGE.localDir };
+  return {
+    target: $("st-target").value,
+    localDir: $("st-localDir").value.trim() || DEFAULT_STORAGE.localDir,
+    nasUrl: $("st-nasUrl").value.trim(),
+    nasKey: $("st-nasKey").value.trim(),
+  };
+}
+
+function showTarget() {
+  const nas = $("st-target").value === "nas";
+  for (const id of ["st-nas-url-l", "st-nas-key-l", "st-test"]) $(id).style.display = nas ? "" : "none";
+  $("st-local-l").style.display = nas ? "none" : "";
 }
 
 function setStatus(text, kind = "") {
@@ -74,9 +85,18 @@ function setStatus(text, kind = "") {
 
 async function initStorage() {
   const data = await store.get([STORAGE_KEY, "theme", "manga_lang_mode"]);
-  storageSettings = { localDir: data[STORAGE_KEY]?.localDir || DEFAULT_STORAGE.localDir };
+  storageSettings = { ...DEFAULT_STORAGE, ...(data[STORAGE_KEY] ?? {}) };
+  $("st-target").value = storageSettings.target;
+  $("st-nasUrl").value = storageSettings.nasUrl;
+  $("st-nasKey").value = storageSettings.nasKey;
+  $("st-target").addEventListener("change", showTarget);
+  $("st-test").addEventListener("click", async () => {
+    setStatus("Deneniyor…");
+    try { await testNas(readStorageForm()); setStatus("NAS'a yazılabiliyor", "ok"); } catch (e) { setStatus(e.message, "err"); }
+  });
   document.body.dataset.theme = data.theme ?? "dark";
   $("st-localDir").value = storageSettings.localDir;
+  showTarget();
 
   $("lang-mode").innerHTML = Object.entries(LANGUAGE_MODES).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join("");
   $("lang-mode").value = data.manga_lang_mode ?? "tr-first";
