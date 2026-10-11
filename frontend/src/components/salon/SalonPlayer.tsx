@@ -60,7 +60,27 @@ function trackLabel(t: MediaTrack) {
 }
 
 type SubSel = { kind: "off" } | { kind: "external" } | { kind: "embedded"; index: number };
-type Prefs = { volume?: number; captions?: boolean; audioLang?: string; subLang?: string; compatHeight?: number };
+type Prefs = { volume?: number; captions?: boolean; audioLang?: string; subLang?: string; compatHeight?: number; subStyle?: Partial<SubStyle> };
+
+/** Subtitle look, drawn by us (not the browser) so it behaves the same in every browser */
+type SubStyle = { size: number; bottom: number; bg: number; color: string };
+const DEFAULT_SUB_STYLE: SubStyle = { size: 1, bottom: 6, bg: 0.6, color: "#ffffff" };
+const SUB_COLORS = [
+  { label: "Beyaz", value: "#ffffff" },
+  { label: "Sarı", value: "#ffe14d" },
+  { label: "Yeşil", value: "#7dff9b" },
+];
+const clampNum = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(n * 100) / 100));
+
+/** Cue text to safe HTML: only <i>, <b>, <u> survive */
+function cueHtml(text: string) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/&lt;(\/?)([ibu])>/gi, "<$1$2>")
+    .replace(/\{\\[^}]*\}/g, "")
+    .replace(/\n/g, "<br/>");
+}
 
 function readPrefs(): Prefs {
   try {
@@ -162,6 +182,8 @@ export default function SalonPlayer({
   const [base, setBase] = useState<number | null>(() => (initialAudio(tracks, readPrefs()) === null ? 0 : null));
   const [subSel, setSubSel] = useState<SubSel>(() => initialSub(tracks, Boolean(subtitle), readPrefs()));
   const [subUrl, setSubUrl] = useState<string | null>(null);
+  const [subStyle, setSubStyle] = useState<SubStyle>(DEFAULT_SUB_STYLE);
+  const [activeCues, setActiveCues] = useState<string[]>([]);
   const [compat, setCompat] = useState<number>(() => readPrefs().compatHeight ?? 0);
   const audioRef = useRef(audio);
   const baseRef = useRef(base);
@@ -199,6 +221,7 @@ export default function SalonPlayer({
     const saved = readPrefs();
     if (typeof saved.volume === "number") setVolume(saved.volume);
     if (typeof saved.captions === "boolean") setCaptions(saved.captions);
+    if (saved.subStyle) setSubStyle({ ...DEFAULT_SUB_STYLE, ...saved.subStyle });
   }, []);
   useEffect(() => {
     savePrefs({ volume, captions });
@@ -265,11 +288,35 @@ export default function SalonPlayer({
     };
   }, [subSel, subtitle, shift]);
 
+  // The browser's own subtitle drawing stays off (mode "hidden" still delivers cue events); we draw the active cues ourselves
   useEffect(() => {
     const v = video();
-    const track = v?.textTracks[0];
-    if (track) track.mode = captions && subUrl ? "showing" : "hidden";
-  }, [captions, subUrl]);
+    setActiveCues([]);
+    if (!v || !subUrl) return;
+    let detach = () => {};
+    const attach = () => {
+      const track = v.textTracks[0];
+      if (!track) return;
+      detach();
+      track.mode = "hidden";
+      const update = () => setActiveCues(Array.from(track.activeCues ?? []).map((c) => (c as VTTCue).text));
+      track.addEventListener("cuechange", update);
+      detach = () => track.removeEventListener("cuechange", update);
+      update();
+    };
+    attach();
+    v.textTracks.addEventListener("addtrack", attach);
+    return () => {
+      v.textTracks.removeEventListener("addtrack", attach);
+      detach();
+    };
+  }, [subUrl]);
+
+  const changeSubStyle = (patch: Partial<SubStyle>) => {
+    const next = { ...subStyle, ...patch };
+    setSubStyle(next);
+    savePrefs({ subStyle: next });
+  };
 
   const togglePlay = useCallback(() => {
     const v = video();
@@ -619,8 +666,6 @@ export default function SalonPlayer({
             holdPause.current = true;
             v.pause();
           }
-          const track = v.textTracks[0];
-          if (track) track.mode = captions && subUrl ? "showing" : "hidden";
         }}
         onTimeUpdate={(e) => {
           const v = e.currentTarget;
@@ -642,6 +687,17 @@ export default function SalonPlayer({
       >
         {subUrl ? <track key={subUrl} kind="captions" srcLang="tr" label="Altyazı" src={subUrl} default /> : null}
       </video>
+
+      {subActive && activeCues.length ? (
+        <div
+          className={`sub-overlay${idle && !paused ? "" : " lifted"}`}
+          style={{ bottom: `${subStyle.bottom}%`, fontSize: `calc(${subStyle.size} * max(16px, 2.3cqw))`, color: subStyle.color }}
+        >
+          {activeCues.map((c, i) => (
+            <span key={i} style={{ background: `rgba(0,0,0,${subStyle.bg})` }} dangerouslySetInnerHTML={{ __html: cueHtml(c) }} />
+          ))}
+        </div>
+      ) : null}
 
       {busy && !error ? <div className="spinner" aria-label="Yükleniyor" /> : null}
       {flash ? (
@@ -681,6 +737,37 @@ export default function SalonPlayer({
                 </button>
               ))}
               <div className="settings-note">Siyah ekran ama ses varsa uyumlu modu aç; sunucu videoyu çevirir, Pi'de yüksek çözünürlük takılabilir.</div>
+            </div>
+          ) : null}
+          {subUrl || subtitle || tracks?.subtitles.some((t) => t.text) ? (
+            <div className="settings-group">
+              <div className="settings-title">Altyazı görünümü</div>
+              <div className="settings-row">
+                <span>Boyut {Math.round(subStyle.size * 100)}%</span>
+                <button onClick={() => changeSubStyle({ size: clampNum(subStyle.size - 0.1, 0.5, 2.5) })}>−</button>
+                <button onClick={() => changeSubStyle({ size: clampNum(subStyle.size + 0.1, 0.5, 2.5) })}>+</button>
+              </div>
+              <div className="settings-row">
+                <span>Konum</span>
+                <button onClick={() => changeSubStyle({ bottom: clampNum(subStyle.bottom - 2, 0, 60) })}>Aşağı</button>
+                <button onClick={() => changeSubStyle({ bottom: clampNum(subStyle.bottom + 2, 0, 60) })}>Yukarı</button>
+              </div>
+              <div className="settings-row">
+                <span>Arka plan {Math.round(subStyle.bg * 100)}%</span>
+                <button onClick={() => changeSubStyle({ bg: clampNum(subStyle.bg - 0.15, 0, 1) })}>−</button>
+                <button onClick={() => changeSubStyle({ bg: clampNum(subStyle.bg + 0.15, 0, 1) })}>+</button>
+              </div>
+              <div className="settings-row">
+                <span>Renk</span>
+                {SUB_COLORS.map((c) => (
+                  <button key={c.value} className={subStyle.color === c.value ? "active" : ""} style={{ color: c.value }} onClick={() => changeSubStyle({ color: c.value })}>
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+              <div className="settings-row">
+                <button onClick={() => changeSubStyle(DEFAULT_SUB_STYLE)}>Varsayılana dön</button>
+              </div>
             </div>
           ) : null}
           <div className="settings-group">

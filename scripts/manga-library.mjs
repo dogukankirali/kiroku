@@ -160,8 +160,18 @@ let osToken = { value: "", at: 0 };
 
 const subProviders = () => ["podnapisi", ...(osKey && osUser && osPass ? ["opensubtitles"] : [])];
 
+/** fetch'in "fetch failed" gibi anlamsız mesajı yerine asıl nedeni (DNS, TLS, zaman aşımı…) gösterir */
+async function fetchDetailed(url, init) {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    const cause = err?.cause?.code ?? err?.cause?.message ?? err?.name ?? "";
+    throw new Error(`${new URL(String(url)).hostname} bağlantı hatası${cause ? ` (${cause})` : ""}`);
+  }
+}
+
 async function getJson(url, init = {}) {
-  const res = await fetch(url, { ...init, headers: { "User-Agent": UA, Accept: "application/json", ...(init.headers ?? {}) }, signal: AbortSignal.timeout(20000) });
+  const res = await fetchDetailed(url, { ...init, headers: { "User-Agent": UA, Accept: "application/json", ...(init.headers ?? {}) }, signal: AbortSignal.timeout(20000) });
   if (!res.ok) throw new Error(`${new URL(url).hostname} ${res.status}`);
   return res.json();
 }
@@ -214,11 +224,11 @@ async function downloadSubtitle({ provider, id }) {
       headers: { "Api-Key": osKey, Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ file_id: Number(id) }),
     });
-    const res = await fetch(info.link, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(30000) });
+    const res = await fetchDetailed(info.link, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(30000) });
     if (!res.ok) throw new Error(`opensubtitles dosya ${res.status}`);
     return { bytes: Buffer.from(await res.arrayBuffer()), name: info.file_name ?? "" };
   }
-  const res = await fetch(`${PODNAPISI_URL}/subtitles/${encodeURIComponent(id)}/download?container=zip`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(30000) });
+  const res = await fetchDetailed(`${PODNAPISI_URL}/subtitles/${encodeURIComponent(id)}/download?container=zip`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(30000) });
   if (!res.ok) throw new Error(`podnapisi dosya ${res.status}`);
   return { bytes: Buffer.from(await res.arrayBuffer()), name: "" };
 }
@@ -372,11 +382,21 @@ createServer(async (req, res) => {
            ...(q.has("compat") ? ["-vf", `scale=-2:'min(${Math.min(2160, Math.max(240, Math.round(Number(q.get("compat"))) || 720))},ih)',format=yuv420p`, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-g", "48", "-sc_threshold", "0"] : ["-c:v", "copy"]),
            "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-sn",
            "-avoid_negative_ts", "make_zero", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"],
-          { stdio: ["ignore", "pipe", "ignore"] }
+          { stdio: ["ignore", "pipe", "pipe"] }
         );
+        // ffmpeg hata verirse docker logs'ta görünsün (tarayıcıdan kapanma = bizim SIGKILL'imiz, hata sayılmaz)
+        let errTail = "";
+        let closedByClient = false;
+        proc.stderr.on("data", (d) => (errTail = (errTail + d).slice(-1500)));
+        proc.on("close", (code) => {
+          if (code && !closedByClient) console.error(`ffmpeg çıkış ${code} (${path}, ses ${a}, başlangıç ${start}${q.has("compat") ? ", uyumlu mod" : ""}):\n${errTail}`);
+        });
         res.writeHead(200, { ...cors, "Content-Type": "video/mp4", "Cache-Control": "no-store" });
         proc.stdout.pipe(res);
-        const stop = () => proc.kill("SIGKILL");
+        const stop = () => {
+          closedByClient = true;
+          proc.kill("SIGKILL");
+        };
         res.on("close", stop);
         proc.on("error", () => res.destroy());
         return;
