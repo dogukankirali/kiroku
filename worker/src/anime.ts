@@ -489,8 +489,11 @@ export async function updateEpisode(c: Ctx) {
     );
   }
   const watchStatus = episode > 0 ? episode : int(field(body, "watchStatus"));
-  await upsertUserAnime(db, c.get("user")!.userId, found.id, { watch_status: watchStatus }).run();
-  return c.json({ id: found.id, name: found.name, watchStatus });
+  // İsteğe bağlı puan (eklentideki "izliyorum, puanla" penceresi); verilmezse puana dokunulmaz
+  const rawScore = field(body, "score");
+  const score = rawScore === undefined || rawScore === null || rawScore === "" ? null : Math.min(10, Math.max(0, num(rawScore)));
+  await upsertUserAnime(db, c.get("user")!.userId, found.id, { watch_status: watchStatus, ...(score !== null ? { score } : {}) }).run();
+  return c.json({ id: found.id, name: found.name, watchStatus, ...(score !== null ? { score } : {}) });
 }
 
 anime.all("/anime/update-episode", requireAuth, updateEpisode);
