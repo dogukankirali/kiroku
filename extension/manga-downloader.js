@@ -308,10 +308,31 @@ async function downloadSelected() {
   $("stop").disabled = true;
 }
 
+// ------------------------------ Güncele gel ------------------------------
+// Kiroku'daki "Güncele gel" düğmesi sayfayı ?update=1&q=<ad>&series=<klasör>&after=<son bölüm> ile açar:
+// açık kaynaklarda arar, birebir eşleşenlerle bölümleri birleştirir, kütüphanedeki son bölümden yenileri indirir.
+
+async function autoUpdate(params) {
+  const after = Number(params.get("after")) || 0;
+  $("q").value = params.get("q");
+  await search();
+  if (![...document.querySelectorAll("[data-pick]")].some((s) => s.value !== "-1")) {
+    return log("Hiçbir kaynakta birebir eşleşen seri bulunamadı. Kaynaktan seri seçip 'Bölümleri getir'e bas.", "err");
+  }
+  await loadChapters();
+  $("series-name").value = params.get("series") || $("series-name").value;
+  renderChapters();
+  const missing = checkboxes().filter((cb) => (chapters[cb.dataset.ch].number ?? -1) > after);
+  if (!missing.length) return log(`Yeni bölüm yok (kütüphanede son bölüm ${after}).`, "ok");
+  missing.forEach((cb) => (cb.checked = true));
+  log(`${missing.length} yeni bölüm bulundu (> ${after}), indiriliyor…`);
+  await downloadSelected();
+}
+
 // ------------------------------ Başlat ------------------------------
 
 renderSourceToggles();
-initStorage();
+const initDone = initStorage();
 $("search").addEventListener("click", search);
 $("q").addEventListener("keydown", (e) => e.key === "Enter" && search());
 $("select-range").addEventListener("click", selectRange);
@@ -323,3 +344,8 @@ $("stop").addEventListener("click", () => {
   stopRequested = true;
   $("stop").disabled = true;
 });
+
+{
+  const params = new URLSearchParams(location.search);
+  if (params.get("update") === "1" && params.get("q")) initDone.then(() => autoUpdate(params));
+}

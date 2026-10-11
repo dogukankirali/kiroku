@@ -18,6 +18,7 @@ import { ChapterService, MangaService, errorText, type Chapter, type Manga } fro
 import { fetchMediaDetail, formatFuzzy, plainDescription, type MediaDetail } from "../../../lib/anilistDetail";
 import { GenreChips } from "../../../components/Common/GenreChip";
 import MangaEditorDialog from "../../../components/manga/MangaEditorDialog";
+import { requestMangaCatchUp } from "../../../lib/extensionBridge";
 import { LibraryChapterForm, LibrarySettings, MangaDexPanel } from "../../../components/manga/ChapterSourcesPanel";
 import { chapterLabel, FORMAT_LABEL, PUB_STATUS_LABEL, READ_STATUS_COLOR, READ_STATUS_LABEL, progressText } from "../../../components/manga/mangaLabels";
 import { palette } from "../../../theme/customTheme";
@@ -60,6 +61,16 @@ function MangaDetail() {
     if (!manga) return null;
     return visible.find((c) => c.number > manga.chaptersRead) ?? null;
   }, [visible, manga]);
+
+  // Library folder name = first path segment of a library chapter; falls back to the manga name
+  const catchUp = async () => {
+    if (!manga) return;
+    const lib = chapters.filter((c) => c.filePath);
+    const series = lib[0]?.filePath.split("/")[0] || manga.name;
+    const after = Math.max(0, ...lib.map((c) => c.number));
+    const ok = await requestMangaCatchUp({ title: manga.name, series, after });
+    setError(ok === null ? "Eklenti bulunamadı. Kiroku eklentisi kurulu ve yenilenmiş olmalı." : ok ? "" : "Eklenti isteği kabul etmedi.");
+  };
 
   const remove = async (ch: Chapter) => {
     if (!confirm(`${chapterLabel(ch)} silinsin mi?`)) return;
@@ -131,6 +142,9 @@ function MangaDetail() {
             {detail?.endDate && formatFuzzy(detail.endDate) && <span>Bitiş: {formatFuzzy(detail.endDate)}</span>}
             {detail?.siteUrl && <a href={detail.siteUrl} target="_blank" rel="noreferrer" style={{ color: palette.primary }}>AniList <OpenInNewRoundedIcon sx={{ fontSize: 12 }} /></a>}
             {manga.malLink && <a href={manga.malLink} target="_blank" rel="noreferrer" style={{ color: palette.primary }}>MyAnimeList <OpenInNewRoundedIcon sx={{ fontSize: 12 }} /></a>}
+          </Box>
+          <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
+            <Button variant="outlined" onClick={catchUp}>Güncele gel (eklenti)</Button>
           </Box>
           {next && (
             <Box>

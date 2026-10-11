@@ -107,6 +107,16 @@ function processSkips(currentUrl) {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // Kiroku sayfası açık anime sekmelerini ister (yalnızca Kiroku sayfasındaki içerik betiği gönderir)
+    if (request.action === 'openMangaCatchUp') {
+        const ORIGINS = ['https://app.dogukankirali.com', 'https://kiroku.dogukankirali.workers.dev', 'http://localhost:3000'];
+        let origin = '';
+        try { origin = new URL(sender.url || '').origin; } catch (e) {}
+        if (!ORIGINS.includes(origin) || !request.title) { sendResponse({ ok: false }); return; }
+        const q = new URLSearchParams({ update: '1', q: request.title, series: request.series || request.title, after: String(request.after || 0) });
+        chrome.tabs.create({ url: chrome.runtime.getURL('manga-downloader.html') + '?' + q });
+        sendResponse({ ok: true });
+        return;
+    }
     if (request.action === 'getOpenAnimeTabs') {
         const KIROKU_ORIGINS = ['https://app.dogukankirali.com', 'https://kiroku.dogukankirali.workers.dev', 'http://localhost:3000'];
         let senderOrigin = '';

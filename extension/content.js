@@ -850,6 +850,13 @@ if (isTopFrame && KIROKU_ORIGINS.includes(location.origin)) {
     window.addEventListener('message', (event) => {
         if (event.source !== window || event.origin !== location.origin) return;
         const msg = event.data;
+        if (msg && msg.source === 'kiroku-page' && msg.type === 'MANGA_CATCH_UP') {
+            chrome.runtime.sendMessage({ action: 'openMangaCatchUp', title: String(msg.title || ''), series: String(msg.series || ''), after: Number(msg.after) || 0 }, (response) => {
+                const ok = !chrome.runtime.lastError && !!(response && response.ok);
+                window.postMessage({ source: 'kiroku-extension', type: 'MANGA_CATCH_UP_ACK', id: msg.id, ok }, location.origin);
+            });
+            return;
+        }
         if (!msg || msg.source !== 'kiroku-page' || msg.type !== 'GET_OPEN_TABS') return;
         chrome.runtime.sendMessage({ action: 'getOpenAnimeTabs' }, (response) => {
             const tabs = (!chrome.runtime.lastError && response && response.tabs) || [];
