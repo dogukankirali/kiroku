@@ -208,7 +208,8 @@ async function searchSubtitles({ provider, q, lang, season, episode }) {
     const wanted = LANG_NAMES[lang];
     const epNum = Number(episode) || 0;
     // The list may sit at data, data.data, data.data.data (paginator) or data.subtitles
-    const list = [data, data.data, data.data?.data, data.subtitles, data.data?.subtitles, data.data?.items, data.items].find(Array.isArray) ?? [];
+    const list = [data, data.data, data.data?.data, data.subtitles, data.data?.subtitles, data.data?.items, data.items].find(Array.isArray);
+    if (!list) throw new Error(`AniSub yanıt şekli beklenmedik: ${JSON.stringify(data).slice(0, 300)}`);
     const rows = list
       .filter((a) => !wanted || String(a.subtitle_language ?? "").toLocaleLowerCase("tr") === wanted)
       .map((a) => {
