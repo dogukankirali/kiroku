@@ -75,6 +75,7 @@ const clampNum = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo
 /** Cue text to safe HTML: only <i>, <b>, <u> survive */
 function cueHtml(text: string) {
   return text
+    .replace(/<(?!\/?[ibu]>)\/?[a-z][^>]*>/gi, "") // <font ...>, <c.x>, <v name> etc.: strip, keep text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/&lt;(\/?)([ibu])>/gi, "<$1$2>")

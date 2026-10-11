@@ -357,7 +357,7 @@ async function downloadSelected() {
 
 // ------------------------------ Güncele gel ------------------------------
 // Kiroku'daki "Güncele gel" düğmesi sayfayı ?update=1&q=<ad>&series=<klasör>&after=<son bölüm> ile açar:
-// açık kaynaklarda arar, birebir eşleşenlerle bölümleri birleştirir, kütüphanedeki son bölümden yenileri indirir.
+// açık kaynaklarda arar, birebir eşleşenlerle bölümleri birleştirir, kütüphanedeki son bölümden yenileri seçer (indirmeyi kullanıcı başlatır).
 
 async function autoUpdate(params) {
   const after = Number(params.get("after")) || 0;
@@ -372,8 +372,8 @@ async function autoUpdate(params) {
   const missing = checkboxes().filter((cb) => (chapters[cb.dataset.ch].number ?? -1) > after);
   if (!missing.length) return log(`Yeni bölüm yok (kütüphanede son bölüm ${after}).`, "ok");
   missing.forEach((cb) => (cb.checked = true));
-  log(`${missing.length} yeni bölüm bulundu (> ${after}), indiriliyor…`);
-  await downloadSelected();
+  // İndirmeyi kullanıcı başlatır: hedefi (yerel/NAS) kontrol edip istemediği bölümlerin işaretini kaldırabilsin
+  log(`${missing.length} yeni bölüm seçildi (> ${after}). Hedefi kontrol et, istemediklerinin işaretini kaldır, sonra 'İndir'e bas.`, "ok");
 }
 
 // ------------------------------ Başlat ------------------------------
