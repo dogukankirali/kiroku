@@ -12,7 +12,7 @@ import { API_BASE } from "../../Services/http";
 // Sol panelde kayan kapak mozaiği: en yüksek puanlı animeler. Liste giriş istediği için mozaik
 // herkese açık /anime-showcase'ten beslenir; alınamazsa yalnızca renkli arka plan kalır.
 const MOSAIC_CACHE_KEY = "kirokuMosaicCovers";
-const MOSAIC_TTL_MS = 24 * 60 * 60 * 1000;
+const MOSAIC_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function readMosaicCache(count: number): string[] | null {
   try {
@@ -22,7 +22,7 @@ function readMosaicCache(count: number): string[] | null {
   return null;
 }
 
-// Liste tarayıcıda bir gün saklanır: giriş sayfası her açıldığında istek atılmaz
+// Liste tarayıcıda bir hafta saklanır: giriş sayfası her açıldığında istek atılmaz
 function useMosaicCovers(count: number) {
   const [covers, setCovers] = useState<string[]>([]);
   useEffect(() => {
