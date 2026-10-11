@@ -685,6 +685,16 @@ export default function SalonPlayer({
           ) : null}
           <div className="settings-group">
             <div className="settings-title">Altyazı</div>
+            {onFindSubtitles ? (
+              <button
+                onClick={() => {
+                  setMenu(false);
+                  onFindSubtitles();
+                }}
+              >
+                Altyazı bul…
+              </button>
+            ) : null}
             <button className={!subActive ? "active" : ""} onClick={() => chooseSub({ kind: "off" })}>
               Kapalı
             </button>
@@ -701,16 +711,6 @@ export default function SalonPlayer({
               ) : null
             )}
             {(tracks?.subtitles ?? []).some((s) => !s.text) ? <div className="settings-note">Resim biçimindeki (PGS/VobSub) altyazılar gösterilemez.</div> : null}
-            {onFindSubtitles ? (
-              <button
-                onClick={() => {
-                  setMenu(false);
-                  onFindSubtitles();
-                }}
-              >
-                Altyazı bul…
-              </button>
-            ) : null}
           </div>
         </div>
       ) : null}
