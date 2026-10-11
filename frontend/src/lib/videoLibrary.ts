@@ -206,8 +206,8 @@ export async function saveSubtitleFile(p: { provider: string; id: string; lang: 
 }
 
 /** MP4 stream of the file with one chosen audio track, starting at `start` seconds (video is copied, audio becomes AAC) */
-export function audioStreamUrl(path: string, audioIndex: number, start: number, compat = false) {
-  return httpUrl(loadVideoLibrary(), path, false, { audio: audioIndex, start: Math.max(0, start), ...(compat ? { compat: 1 } : {}) });
+export function audioStreamUrl(path: string, audioIndex: number, start: number, compatHeight = 0) {
+  return httpUrl(loadVideoLibrary(), path, false, { audio: audioIndex, start: Math.max(0, start), ...(compatHeight ? { compat: compatHeight } : {}) });
 }
 
 /** Where a stream asked to start at `t` really starts: the closest keyframe before it, so subtitles stay in sync */

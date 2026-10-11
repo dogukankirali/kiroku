@@ -15,7 +15,7 @@ type Props = {
   src: string;
   subtitle?: string | null;
   tracks?: MediaTracks | null;
-  audioUrl?: (audioIndex: number, start: number, compat: boolean) => string;
+  audioUrl?: (audioIndex: number, start: number, compatHeight: number) => string;
   snapStart?: (t: number) => Promise<number>;
   loadSubtitle?: (subIndex: number) => Promise<string>;
   /** Verilirse ayar menüsünde "Altyazı bul…" çıkar */
@@ -60,7 +60,7 @@ function trackLabel(t: MediaTrack) {
 }
 
 type SubSel = { kind: "off" } | { kind: "external" } | { kind: "embedded"; index: number };
-type Prefs = { volume?: number; captions?: boolean; audioLang?: string; subLang?: string; compat?: boolean };
+type Prefs = { volume?: number; captions?: boolean; audioLang?: string; subLang?: string; compatHeight?: number };
 
 function readPrefs(): Prefs {
   try {
@@ -77,7 +77,7 @@ function initialAudio(tracks: MediaTracks | null | undefined, prefs: Prefs): num
   if (!tracks || !native) return null;
   const wanted = prefs.audioLang ? tracks.audio.find((a) => a.lang === prefs.audioLang) : undefined;
   // Compatibility mode always streams (transcoded), even for the browser's own audio track
-  if (prefs.compat) return (wanted ?? native).index;
+  if (prefs.compatHeight) return (wanted ?? native).index;
   return wanted && wanted.index !== native.index ? wanted.index : null;
 }
 function initialSub(tracks: MediaTracks | null | undefined, hasExternal: boolean, prefs: Prefs): SubSel {
@@ -162,7 +162,7 @@ export default function SalonPlayer({
   const [base, setBase] = useState<number | null>(() => (initialAudio(tracks, readPrefs()) === null ? 0 : null));
   const [subSel, setSubSel] = useState<SubSel>(() => initialSub(tracks, Boolean(subtitle), readPrefs()));
   const [subUrl, setSubUrl] = useState<string | null>(null);
-  const [compat, setCompat] = useState<boolean>(() => Boolean(readPrefs().compat));
+  const [compat, setCompat] = useState<number>(() => readPrefs().compatHeight ?? 0);
   const audioRef = useRef(audio);
   const baseRef = useRef(base);
   audioRef.current = audio;
@@ -391,10 +391,10 @@ export default function SalonPlayer({
   };
 
   // Compatibility mode: the server transcodes the video to 8-bit H.264 (for codecs the browser cannot decode, e.g. HEVC 10-bit in Firefox)
-  const toggleCompat = () => {
-    const next = !compat;
+  const chooseCompat = (next: number) => {
+    if (next === compat) return setMenu(false);
     const native = nativeAudio(tracks);
-    savePrefs({ compat: next });
+    savePrefs({ compatHeight: next });
     setCompat(next);
     setMenu(false);
     if (!native) return;
@@ -402,7 +402,15 @@ export default function SalonPlayer({
     keepPaused.current = video()?.paused ?? false;
     const token = ++switchToken.current;
     setBusy(true);
-    if (next) {
+    if (audioRef.current !== null && (next || audioRef.current !== native.index)) {
+      // Already streaming: restart the stream (new height, or back to video copy with keyframe snapping)
+      setBase(null);
+      (snapStart ? snapStart(t) : Promise.resolve(t)).then((b) => {
+        if (token !== switchToken.current) return;
+        setBase(b);
+        setTime(b);
+      });
+    } else if (next) {
       setAudio(audioRef.current ?? native.index);
       (snapStart ? snapStart(t) : Promise.resolve(t)).then((b) => {
         if (token !== switchToken.current) return;
@@ -664,10 +672,15 @@ export default function SalonPlayer({
           {tracks ? (
             <div className="settings-group">
               <div className="settings-title">Görüntü</div>
-              <button className={compat ? "active" : ""} onClick={toggleCompat}>
-                Uyumlu mod (H.264'e çevir)
+              <button className={!compat ? "active" : ""} onClick={() => chooseCompat(0)}>
+                Orijinal
               </button>
-              <div className="settings-note">Siyah ekran ama ses varsa aç. Sunucu videoyu 720p'ye çevirir.</div>
+              {[480, 720, 1080].map((h) => (
+                <button key={h} className={compat === h ? "active" : ""} onClick={() => chooseCompat(h)}>
+                  Uyumlu mod · {h}p (H.264)
+                </button>
+              ))}
+              <div className="settings-note">Siyah ekran ama ses varsa uyumlu modu aç; sunucu videoyu çevirir, Pi'de yüksek çözünürlük takılabilir.</div>
             </div>
           ) : null}
           <div className="settings-group">
