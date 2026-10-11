@@ -16,10 +16,12 @@ import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 import { AnimeService } from "../../Services/AnimeServices";
 import { palette } from "../../theme/customTheme";
 import SalonPlayer from "../../components/salon/SalonPlayer";
+import SubtitleFinder from "../../components/salon/SubtitleFinder";
 import {
   Episode,
   VideoLibraryConfig,
   MediaTracks,
+  SubtitleInfo,
   VideoLibraryError,
   audioStreamUrl,
   canPickFolder,
@@ -31,9 +33,11 @@ import {
   loadVideoLibrary,
   localFolderName,
   matchFolder,
+  norm,
   pickVideoFolder,
   saveFolder,
   saveVideoLibrary,
+  subtitleInfo,
   subtitleUrl,
   videoUrl,
 } from "../../lib/videoLibrary";
@@ -137,6 +141,14 @@ function Salon() {
   const [theater, setTheater] = useState(false);
   const [toast, setToast] = useState("");
   const [folderQuery, setFolderQuery] = useState("");
+  const [subDirs, setSubDirs] = useState<string[]>([]);
+  const [subInfo, setSubInfo] = useState<SubtitleInfo | null>(null);
+  const [finderOpen, setFinderOpen] = useState(false);
+  const [epReload, setEpReload] = useState(0);
+  const [browsePath, setBrowsePath] = useState("");
+  const [browseDirs, setBrowseDirs] = useState<string[] | null>(null);
+  const animeRef = useRef<TEATable.IAnime | null>(null);
+  animeRef.current = anime;
   const markedRef = useRef<string>("");
   const lastSave = useRef(0);
 
@@ -171,17 +183,59 @@ function Salon() {
     };
   }, [anime, reload]);
 
+  // Klasördeki bölümler. Videolar alt klasördeyse ('Seri/Seri' ya da sezon klasörleri) adı animeye uyan ya da tek olan alt klasöre inilir,
+  // olmazsa alt klasörler listelenip seçtirilir; seçilen yol hatırlanır.
   useEffect(() => {
-    if (!folder) return setEpisodes(null);
+    if (!folder) {
+      setSubDirs([]);
+      return setEpisodes(null);
+    }
     let alive = true;
     setEpisodes(null);
-    listEpisodes(folder)
-      .then((eps) => alive && setEpisodes(eps))
-      .catch((e) => alive && setLibError(e instanceof VideoLibraryError ? e : new VideoLibraryError(String(e?.message ?? e), "config")));
+    setSubDirs([]);
+    (async () => {
+      const eps = await listEpisodes(folder);
+      if (!alive) return;
+      if (eps.length) return setEpisodes(eps);
+      const dirs = (await listVideoLibrary(folder)).filter((e) => e.isDir).map((e) => e.name).sort((a, b) => a.localeCompare(b, "tr", { numeric: true }));
+      if (!alive) return;
+      const a = animeRef.current;
+      const names = a ? [String(a.Name), String(a.EnglishName ?? "")].filter(Boolean).map(norm) : [];
+      const pick = dirs.find((d) => names.includes(norm(d))) ?? (dirs.length === 1 ? dirs[0] : null);
+      if (pick && a) {
+        saveFolder(a.ID, `${folder}/${pick}`);
+        return setFolder(`${folder}/${pick}`);
+      }
+      setSubDirs(dirs);
+      setEpisodes([]);
+    })().catch((e) => alive && setLibError(e instanceof VideoLibraryError ? e : new VideoLibraryError(String(e?.message ?? e), "config")));
     return () => {
       alive = false;
     };
-  }, [folder]);
+  }, [folder, epReload]);
+
+  // Kütüphane sunucusu altyazı arayıp kaydedebiliyor mu (ffmpeg'li --writable sürüm)
+  useEffect(() => {
+    let alive = true;
+    subtitleInfo().then((info) => alive && setSubInfo(info));
+    return () => {
+      alive = false;
+    };
+  }, [reload]);
+
+  // Klasör seçici: kütüphanede iç içe klasörlere inilebilir
+  const choosing = Boolean(anime && !libError && folders && !folder);
+  useEffect(() => {
+    if (!choosing) return;
+    let alive = true;
+    setBrowseDirs(null);
+    listVideoLibrary(browsePath)
+      .then((entries) => alive && setBrowseDirs(entries.filter((e) => e.isDir).map((e) => e.name).sort((a, b) => a.localeCompare(b, "tr", { numeric: true }))))
+      .catch(() => alive && setBrowseDirs([]));
+    return () => {
+      alive = false;
+    };
+  }, [choosing, browsePath]);
 
   const watched = Number(anime?.WatchStatus ?? 0);
   const current = useMemo(() => {
@@ -293,26 +347,48 @@ function Salon() {
         />
       ) : null}
 
-      {anime && !libError && folders && !folder ? (
+      {choosing ? (
         <Box sx={{ ...card, display: "grid", gap: 1.5, maxWidth: 640 }}>
           <Typography sx={{ fontWeight: 700 }}>Bu animenin klasörünü seç</Typography>
           <Typography sx={{ fontSize: "0.85rem", color: palette.textMuted }}>
-            Kütüphanende &quot;{String(anime.Name)}&quot; adlı bir klasör bulunamadı. Seçimin bu tarayıcıda hatırlanır.
+            Kütüphanende &quot;{String(anime!.Name)}&quot; adlı bir klasör bulunamadı. Seri başka bir klasörün içindeyse &quot;Aç&quot; ile içine gir, doğru klasörde &quot;Seç&quot;e bas. Seçimin bu tarayıcıda hatırlanır.
           </Typography>
+          {browsePath ? (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Button size="small" onClick={() => setBrowsePath(browsePath.split("/").slice(0, -1).join("/"))}>
+                ↑ Üst klasör
+              </Button>
+              <Typography sx={{ fontSize: "0.8rem", color: palette.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{browsePath}</Typography>
+              <Button size="small" variant="contained" sx={{ ml: "auto", flexShrink: 0 }} onClick={() => (saveFolder(anime!.ID, browsePath), setFolder(browsePath))}>
+                Bu klasörü seç
+              </Button>
+            </Box>
+          ) : null}
           <TextField size="small" placeholder="Klasör ara…" value={folderQuery} onChange={(e) => setFolderQuery(e.target.value)} />
           <Box sx={{ maxHeight: 360, overflow: "auto", display: "grid" }}>
-            {shownFolders.map((f) => (
-              <MenuItem
-                key={f}
-                onClick={() => {
-                  saveFolder(anime.ID, f);
-                  setFolder(f);
-                }}
-              >
-                {f}
-              </MenuItem>
-            ))}
-            {!shownFolders.length ? <Typography sx={{ color: palette.textMuted, p: 1 }}>Klasör yok</Typography> : null}
+            {(browseDirs ?? [])
+              .filter((f) => f.toLocaleLowerCase("tr").includes(folderQuery.toLocaleLowerCase("tr")))
+              .slice(0, 80)
+              .map((f) => {
+                const path = browsePath ? `${browsePath}/${f}` : f;
+                return (
+                  <MenuItem key={f} onClick={() => (saveFolder(anime!.ID, path), setFolder(path))} sx={{ gap: 1 }}>
+                    <Box sx={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{f}</Box>
+                    <Button
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setBrowsePath(path);
+                        setFolderQuery("");
+                      }}
+                    >
+                      Aç
+                    </Button>
+                  </MenuItem>
+                );
+              })}
+            {browseDirs === null ? <CircularProgress size={20} sx={{ m: 1 }} /> : null}
+            {browseDirs && !browseDirs.length ? <Typography sx={{ color: palette.textMuted, p: 1 }}>Klasör yok</Typography> : null}
           </Box>
           <Box>
             <Button size="small" onClick={() => setLibError(new VideoLibraryError("", "config"))}>
@@ -323,8 +399,18 @@ function Salon() {
       ) : null}
 
       {anime && folder && episodes && !episodes.length ? (
-        <Alert severity="info" sx={{ borderRadius: "12px" }} action={<Button onClick={() => (saveFolder(anime.ID, null), setFolder(null))}>Başka klasör</Button>}>
+        <Alert severity="info" sx={{ borderRadius: "12px" }} action={<Button onClick={() => (saveFolder(anime.ID, null), setFolder(null), setBrowsePath(""))}>Başka klasör</Button>}>
           &quot;{folder}&quot; klasöründe video dosyası yok.
+          {subDirs.length ? " Videolar alt klasörlerden birinde olabilir:" : ""}
+          {subDirs.length ? (
+            <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", mt: 1 }}>
+              {subDirs.slice(0, 30).map((d) => (
+                <Button key={d} size="small" variant="outlined" onClick={() => (saveFolder(anime.ID, `${folder}/${d}`), setFolder(`${folder}/${d}`))}>
+                  {d}
+                </Button>
+              ))}
+            </Box>
+          ) : null}
         </Alert>
       ) : null}
 
@@ -337,9 +423,10 @@ function Salon() {
                 src={media.src}
                 subtitle={media.sub}
                 tracks={media.tracks}
-                audioUrl={(index, start) => audioStreamUrl(current.file, index, start)}
+                audioUrl={(index, start, compatHeight) => audioStreamUrl(current.file, index, start, compatHeight)}
                 snapStart={(t) => keyframeBefore(current.file, t)}
                 loadSubtitle={loadEmbeddedSubtitle}
+                onFindSubtitles={subInfo ? () => setFinderOpen(true) : undefined}
                 title={`${String(anime.Name)} · ${current.label}`}
                 startAt={readPos(posKey(id, current.file))}
                 theater={theater}
@@ -385,11 +472,27 @@ function Salon() {
                 </MenuItem>
               );
             })}
-            <Button size="small" sx={{ mt: 1 }} onClick={() => (saveFolder(anime.ID, null), setFolder(null))}>
+            <Button size="small" sx={{ mt: 1 }} onClick={() => (saveFolder(anime.ID, null), setFolder(null), setBrowsePath(""))}>
               Klasörü değiştir
             </Button>
           </Box>
         </Box>
+      ) : null}
+
+      {subInfo && current ? (
+        <SubtitleFinder
+          open={finderOpen}
+          onClose={() => setFinderOpen(false)}
+          info={subInfo}
+          file={current.file}
+          names={[String(anime?.EnglishName ?? ""), String(anime?.Name ?? "")].filter(Boolean)}
+          episode={current.number}
+          onSaved={(name) => {
+            setFinderOpen(false);
+            setToast(`Altyazı kaydedildi: ${name}`);
+            setEpReload((n) => n + 1);
+          }}
+        />
       ) : null}
 
       <Snackbar open={Boolean(toast)} autoHideDuration={3000} onClose={() => setToast("")} message={toast} anchorOrigin={{ vertical: "bottom", horizontal: "center" }} />

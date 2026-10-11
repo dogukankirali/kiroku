@@ -4,8 +4,10 @@
   "version": "16.6",
   "description": "Anime takip (skip sayacı, puan, istatistik) + Kiroku Sync: izleme sitelerinde otomatik bölüm ve watchlist takibi.",
   "permissions": ["storage", "activeTab", "scripting", "webRequest", "downloads", "declarativeNetRequestWithHostAccess"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
   "host_permissions": [
     "https://graphql.anilist.co/*",
+    "https://*.ts.net/*",
     "https://myanimelist.net/*",
     "https://turkanime.co/*",
     "https://www.turkanime.co/*",

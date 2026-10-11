@@ -13,16 +13,25 @@
 //   <dosya>?keyframe=s        → s. saniyeden önceki en yakın anahtar kare (akış tam orada başlayabilsin diye)
 //   <dosya>?audio=<n>&start=s → n. ses izi, s. saniyeden başlayan MP4 akışı (video aynen kopyalanır, ses AAC'ye çevrilir)
 //
-// Kullanım: node scripts/manga-library.mjs [klasör] [--port 8788] [--key <anahtar>]
+// --writable (yalnızca --key ile): kütüphaneye yazmaya da izin verir.
+//   PUT /<yol>                      → dosya yazar (eklentinin manga indirmesi NAS'a böyle gelir: .cbz, .json, .xml, görsel, altyazı)
+//   GET /__subs/providers           → altyazı kaynakları (podnapisi her zaman; opensubtitles için OPENSUBTITLES_API_KEY,
+//                                     OPENSUBTITLES_USER, OPENSUBTITLES_PASS ortam değişkenleri)
+//   GET /__subs/search?q=&lang=&season=&episode=&provider=   → altyazı arar
+//   POST /__subs/save?provider=&id=&lang=&file=<video yolu>  → altyazıyı indirip videonun yanına "<ad>.<dil>.srt" olarak kaydeder
+//
+// Kullanım: node scripts/manga-library.mjs [klasör] [--port 8788] [--key <anahtar>] [--writable]
 //   klasör varsayılanı: <kullanıcı>/Downloads/Kiroku/Manga (Manga İndirici'nin kaydettiği yer)
 //   Anime için örnek: node scripts/manga-library.mjs "D:/Anime" --port 8789
 
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
-import { createReadStream } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve, sep, extname } from "node:path";
+import { basename, dirname, join, resolve, sep, extname } from "node:path";
+import { inflateRawSync } from "node:zlib";
+import { pipeline } from "node:stream/promises";
 
 const args = process.argv.slice(2);
 const option = (name) => {
@@ -31,6 +40,11 @@ const option = (name) => {
 };
 const port = Number(option("--port") ?? 8788);
 const key = option("--key") ?? "";
+const writable = args.includes("--writable");
+if (writable && !key) {
+  console.error("--writable yalnızca --key ile kullanılabilir (anahtarsız yazma herkese açık olurdu).");
+  process.exit(1);
+}
 const rootArg = args.find((a, i) => !a.startsWith("--") && !["--port", "--key"].includes(args[i - 1]));
 const root = resolve(rootArg ?? join(homedir(), "Downloads", "Kiroku", "Manga"));
 
@@ -96,20 +110,212 @@ async function probeTracks(target, mtimeMs) {
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Accept, Authorization, Range",
+  "Access-Control-Allow-Methods": "GET, HEAD, POST, PUT, OPTIONS",
+  "Access-Control-Allow-Headers": "Accept, Authorization, Range, Content-Type",
   "Access-Control-Expose-Headers": "Accept-Ranges, Content-Length, Content-Range",
 };
 
+// ---- Yazma: PUT ile dosya yükleme ----
+
+const WRITE_TYPES = new Set([".cbz", ".json", ".xml", ".jpg", ".jpeg", ".png", ".webp", ".srt", ".vtt", ".ass"]);
+const MAX_UPLOAD = 1024 * 1024 * 1024;
+
+/** Kök içinde kalan mutlak yol; dışına çıkıyorsa null */
+function inRoot(path) {
+  const target = resolve(join(root, path));
+  return target === root || target.startsWith(root + sep) ? target : null;
+}
+
+async function handlePut(req, res, path) {
+  const target = inRoot(path);
+  if (!writable) return res.writeHead(403, cors).end();
+  if (!target || target === root || !WRITE_TYPES.has(extname(target).toLowerCase())) return res.writeHead(400, cors).end();
+  if (Number(req.headers["content-length"] ?? 0) > MAX_UPLOAD) return res.writeHead(413, cors).end();
+  const tmp = `${target}.part-${process.pid}`;
+  try {
+    await mkdir(dirname(target), { recursive: true });
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > MAX_UPLOAD) req.destroy();
+    });
+    await pipeline(req, createWriteStream(tmp));
+    await rename(tmp, target);
+    res.writeHead(201, { ...cors, "Content-Type": "application/json; charset=utf-8" }).end(JSON.stringify({ path, size }));
+  } catch {
+    await rm(tmp, { force: true });
+    if (!res.headersSent) res.writeHead(500, cors).end();
+  }
+}
+
+// ---- Altyazı arama ve indirme ----
+
+const UA = "Kiroku Library v1";
+const OPENSUBTITLES_URL = process.env.OPENSUBTITLES_URL ?? "https://api.opensubtitles.com/api/v1";
+const PODNAPISI_URL = process.env.PODNAPISI_URL ?? "https://www.podnapisi.net";
+const osKey = process.env.OPENSUBTITLES_API_KEY ?? "";
+const osUser = process.env.OPENSUBTITLES_USER ?? "";
+const osPass = process.env.OPENSUBTITLES_PASS ?? "";
+let osToken = { value: "", at: 0 };
+
+const subProviders = () => ["podnapisi", ...(osKey && osUser && osPass ? ["opensubtitles"] : [])];
+
+async function getJson(url, init = {}) {
+  const res = await fetch(url, { ...init, headers: { "User-Agent": UA, Accept: "application/json", ...(init.headers ?? {}) }, signal: AbortSignal.timeout(20000) });
+  if (!res.ok) throw new Error(`${new URL(url).hostname} ${res.status}`);
+  return res.json();
+}
+
+async function openSubtitlesToken() {
+  if (osToken.value && Date.now() - osToken.at < 3600_000) return osToken.value;
+  const data = await getJson(`${OPENSUBTITLES_URL}/login`, {
+    method: "POST",
+    headers: { "Api-Key": osKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ username: osUser, password: osPass }),
+  });
+  osToken = { value: data.token, at: Date.now() };
+  return osToken.value;
+}
+
+/** Sonuç biçimi: { id, name, lang, downloads, provider } */
+async function searchSubtitles({ provider, q, lang, season, episode }) {
+  if (provider === "opensubtitles") {
+    const url = new URL(`${OPENSUBTITLES_URL}/subtitles`);
+    url.searchParams.set("query", q);
+    url.searchParams.set("languages", lang);
+    if (episode) url.searchParams.set("episode_number", episode);
+    if (season) url.searchParams.set("season_number", season);
+    url.searchParams.set("order_by", "download_count");
+    const data = await getJson(url, { headers: { "Api-Key": osKey } });
+    return (data.data ?? []).flatMap((item) => {
+      const a = item.attributes ?? {};
+      const file = (a.files ?? [])[0];
+      return file ? [{ id: String(file.file_id), name: a.release || file.file_name || a.feature_details?.title || "", lang: a.language ?? lang, downloads: a.download_count ?? 0, provider }] : [];
+    });
+  }
+  const url = new URL(`${PODNAPISI_URL}/subtitles/search/advanced`);
+  url.searchParams.set("keywords", q);
+  url.searchParams.set("language", lang);
+  if (season) url.searchParams.set("seasons", season);
+  if (episode) url.searchParams.set("episodes", episode);
+  const data = await getJson(url);
+  return (data.data ?? []).map((item) => {
+    const releases = item.custom_releases?.length ? item.custom_releases : (item.releases ?? []);
+    const release = Array.isArray(releases) ? releases.map((r) => (typeof r === "string" ? r : r.name ?? "")).filter(Boolean).join(" · ") : "";
+    return { id: String(item.id), name: [item.title, item.year, release].filter(Boolean).join(" · "), lang: item.language ?? lang, downloads: item.stats?.downloads ?? item.downloads ?? 0, provider };
+  });
+}
+
+async function downloadSubtitle({ provider, id }) {
+  if (provider === "opensubtitles") {
+    const token = await openSubtitlesToken();
+    const info = await getJson(`${OPENSUBTITLES_URL}/download`, {
+      method: "POST",
+      headers: { "Api-Key": osKey, Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: Number(id) }),
+    });
+    const res = await fetch(info.link, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(30000) });
+    if (!res.ok) throw new Error(`opensubtitles dosya ${res.status}`);
+    return { bytes: Buffer.from(await res.arrayBuffer()), name: info.file_name ?? "" };
+  }
+  const res = await fetch(`${PODNAPISI_URL}/subtitles/${encodeURIComponent(id)}/download?container=zip`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(30000) });
+  if (!res.ok) throw new Error(`podnapisi dosya ${res.status}`);
+  return { bytes: Buffer.from(await res.arrayBuffer()), name: "" };
+}
+
+/** Zip içindeki ilk altyazı dosyası { name, bytes } (yalnızca saklı/deflate girdiler) */
+function firstSubtitleInZip(buf) {
+  let end = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) return null;
+  const count = buf.readUInt16LE(end + 10);
+  let pos = buf.readUInt32LE(end + 16);
+  for (let n = 0; n < count && buf.readUInt32LE(pos) === 0x02014b50; n++) {
+    const method = buf.readUInt16LE(pos + 10);
+    const compressed = buf.readUInt32LE(pos + 20);
+    const nameLen = buf.readUInt16LE(pos + 28);
+    const extraLen = buf.readUInt16LE(pos + 30);
+    const commentLen = buf.readUInt16LE(pos + 32);
+    const local = buf.readUInt32LE(pos + 42);
+    const name = buf.toString("utf8", pos + 46, pos + 46 + nameLen);
+    pos += 46 + nameLen + extraLen + commentLen;
+    if (!/\.(srt|ass|ssa|vtt|sub)$/i.test(name)) continue;
+    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+    const data = buf.subarray(start, start + compressed);
+    return { name, bytes: method === 0 ? data : method === 8 ? inflateRawSync(data) : null };
+  }
+  return null;
+}
+
+/** Metin altyazıyı UTF-8'e çevirir (Türkçe altyazılar çoğu zaman Windows-1254'tür) */
+function toUtf8(bytes, lang) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes).replace(/^﻿/, "");
+  } catch {
+    return new TextDecoder(lang === "tr" ? "windows-1254" : "windows-1252").decode(bytes);
+  }
+}
+
+async function saveSubtitle({ provider, id, lang, file }) {
+  const video = inRoot(file);
+  if (!video || !/\.(mp4|m4v|webm|mkv|mov|ogv)$/i.test(video)) throw new Error("geçersiz video yolu");
+  await stat(video);
+  const got = await downloadSubtitle({ provider, id });
+  const entry = got.bytes[0] === 0x50 && got.bytes[1] === 0x4b ? firstSubtitleInZip(got.bytes) : { name: got.name, bytes: got.bytes };
+  if (!entry?.bytes) throw new Error("indirilen dosyada altyazı bulunamadı");
+  let ext = extname(entry.name).toLowerCase();
+  ext = [".srt", ".ass", ".ssa", ".vtt"].includes(ext) ? ext : ".srt";
+  let text = toUtf8(entry.bytes, lang);
+  if ((ext === ".ass" || ext === ".ssa") && hasFfmpeg) {
+    const proc = spawnSync("ffmpeg", ["-v", "error", "-f", "ass", "-i", "pipe:0", "-f", "srt", "pipe:1"], { input: Buffer.from(text), maxBuffer: 20 * 1024 * 1024 });
+    if (proc.status === 0 && proc.stdout.length) {
+      text = proc.stdout.toString("utf8");
+      ext = ".srt";
+    }
+  }
+  const stem = basename(video).replace(/\.[^.]+$/, "");
+  const name = `${stem}.${lang}${ext}`;
+  await writeFile(join(dirname(video), name), text);
+  return name;
+}
+
+async function handleSubs(req, res, url, path) {
+  const json = (code, body) => res.writeHead(code, { ...cors, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }).end(JSON.stringify(body));
+  const q = url.searchParams;
+  try {
+    if (path === "/__subs/providers") return json(200, { writable, providers: subProviders() });
+    const provider = subProviders().includes(q.get("provider") ?? "") ? q.get("provider") : "podnapisi";
+    const lang = /^[a-z]{2,3}$/i.test(q.get("lang") ?? "") ? q.get("lang").toLowerCase() : "tr";
+    if (path === "/__subs/search") {
+      if (!q.get("q")) return json(400, { error: "q gerekli" });
+      return json(200, await searchSubtitles({ provider, q: q.get("q"), lang, season: q.get("season"), episode: q.get("episode") }));
+    }
+    if (path === "/__subs/save" && req.method === "POST") {
+      if (!writable) return json(403, { error: "sunucu --writable ile başlatılmadı" });
+      return json(200, { saved: await saveSubtitle({ provider, id: q.get("id") ?? "", lang, file: q.get("file") ?? "" }) });
+    }
+    return json(404, { error: "bilinmeyen yol" });
+  } catch (err) {
+    return json(502, { error: String(err?.message ?? err) });
+  }
+}
+
 createServer(async (req, res) => {
   if (req.method === "OPTIONS") return res.writeHead(204, cors).end();
-  if (req.method !== "GET" && req.method !== "HEAD") return res.writeHead(405, cors).end();
-
   const reqUrl = new URL(req.url.replace(/^\/+/, "/"), "http://x");
   if (key && reqUrl.searchParams.get("key") !== key) return res.writeHead(401, cors).end();
   const path = decodeURIComponent(reqUrl.pathname);
-  const target = resolve(join(root, path));
+  if (path.startsWith("/__subs/")) return handleSubs(req, res, reqUrl, path);
+  if (req.method === "PUT") return handlePut(req, res, path);
+  if (req.method !== "GET" && req.method !== "HEAD") return res.writeHead(405, cors).end();
+  const target = inRoot(path);
   // Kök dışına çıkmaya (../) izin verme
-  if (target !== root && !target.startsWith(root + sep)) return res.writeHead(403, cors).end();
+  if (!target) return res.writeHead(403, cors).end();
 
   try {
     const info = await stat(target);
@@ -162,7 +368,9 @@ createServer(async (req, res) => {
         // Video aynen kopyalanır (ucuz), seçilen ses AAC'ye çevrilir; parçalı MP4 olarak akar. Sarma, başka ?start= ile yeni akış demektir.
         const proc = spawn(
           "ffmpeg",
-          ["-v", "error", "-ss", String(start), "-i", target, "-map", "0:v:0", "-map", `0:a:${a}`, "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-sn",
+          ["-v", "error", "-ss", String(start), "-i", target, "-map", "0:v:0", "-map", `0:a:${a}`,
+           ...(q.has("compat") ? ["-vf", `scale=-2:'min(${Math.min(2160, Math.max(240, Math.round(Number(q.get("compat"))) || 720))},ih)',format=yuv420p`, "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-g", "48", "-sc_threshold", "0"] : ["-c:v", "copy"]),
+           "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-sn",
            "-avoid_negative_ts", "make_zero", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"],
           { stdio: ["ignore", "pipe", "ignore"] }
         );
@@ -203,5 +411,5 @@ createServer(async (req, res) => {
     res.writeHead(404, cors).end();
   }
 }).listen(port, () => {
-  console.log(`Kütüphane: http://localhost:${port}  →  ${root}${key ? "  (erişim anahtarı gerekli)" : ""}${hasFfmpeg ? "  (ses/altyazı izleri açık)" : ""}`);
+  console.log(`Kütüphane: http://localhost:${port}  →  ${root}${key ? "  (erişim anahtarı gerekli)" : ""}${hasFfmpeg ? "  (ses/altyazı izleri açık)" : ""}${writable ? "  (yazılabilir)" : ""}`);
 });

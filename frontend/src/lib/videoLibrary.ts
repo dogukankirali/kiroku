@@ -166,9 +166,48 @@ export async function fetchTracks(path: string): Promise<MediaTracks | null> {
   }
 }
 
+// ---- Subtitle search and download (library server with --writable; it talks to the subtitle providers, keys stay on the server) ----
+
+export type SubtitleHit = { id: string; name: string; lang: string; downloads: number; provider: string };
+export type SubtitleInfo = { writable: boolean; providers: string[] };
+
+async function subsJson<T>(path: string, extra: Record<string, string | number>, init?: RequestInit): Promise<T> {
+  const cfg = loadVideoLibrary();
+  const res = await fetch(httpUrl(cfg, path, false, extra), { credentials: "omit", ...init });
+  const data = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
+  if (!res.ok || !data) throw new VideoLibraryError(data?.error ?? `Altyazı sunucusu ${res.status} döndürdü`, "config");
+  return data;
+}
+
+/** What the library server can do about subtitles, or null when it has no such feature (older server, Caddy, local folder) */
+export async function subtitleInfo(): Promise<SubtitleInfo | null> {
+  const cfg = loadVideoLibrary();
+  if (useLocal(cfg) || !cfg.url) return null;
+  try {
+    const res = await fetch(httpUrl(cfg, "__subs/providers"), { credentials: "omit" });
+    if (!res.ok || !(res.headers.get("content-type") ?? "").includes("json")) return null;
+    const data = (await res.json()) as Partial<SubtitleInfo>;
+    return Array.isArray(data.providers) ? { writable: Boolean(data.writable), providers: data.providers } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function searchSubtitles(p: { provider: string; q: string; lang: string; season?: string; episode?: string }): Promise<SubtitleHit[]> {
+  const extra: Record<string, string> = { provider: p.provider, q: p.q, lang: p.lang };
+  if (p.season) extra.season = p.season;
+  if (p.episode) extra.episode = p.episode;
+  return subsJson<SubtitleHit[]>("__subs/search", extra);
+}
+
+/** Downloads a subtitle next to the video file on the server; returns the saved file name */
+export async function saveSubtitleFile(p: { provider: string; id: string; lang: string; file: string }): Promise<string> {
+  return (await subsJson<{ saved: string }>("__subs/save", { provider: p.provider, id: p.id, lang: p.lang, file: p.file }, { method: "POST" })).saved;
+}
+
 /** MP4 stream of the file with one chosen audio track, starting at `start` seconds (video is copied, audio becomes AAC) */
-export function audioStreamUrl(path: string, audioIndex: number, start: number) {
-  return httpUrl(loadVideoLibrary(), path, false, { audio: audioIndex, start: Math.max(0, start) });
+export function audioStreamUrl(path: string, audioIndex: number, start: number, compatHeight = 0) {
+  return httpUrl(loadVideoLibrary(), path, false, { audio: audioIndex, start: Math.max(0, start), ...(compatHeight ? { compat: compatHeight } : {}) });
 }
 
 /** Where a stream asked to start at `t` really starts: the closest keyframe before it, so subtitles stay in sync */
@@ -249,14 +288,16 @@ export async function listEpisodes(folder: string): Promise<Episode[]> {
   return entries
     .filter((e) => VIDEO_RE.test(e.name))
     .map((e) => {
-      const sub = subs.find((s) => stem(s.name) === stem(e.name) || stem(s.name).startsWith(`${stem(e.name)}.`));
+      // Aynı bölümün birden çok altyazısı olabilir ('Ad.tr.srt', 'Ad.en.srt'): Türkçe olan öne alınır
+      const matching = subs.filter((s) => stem(s.name) === stem(e.name) || stem(s.name).startsWith(`${stem(e.name)}.`));
+      const sub = matching.find((s) => /\.(tr|tur|turkce|turkish)\.[^.]+$/i.test(s.name)) ?? matching[0];
       const number = parseEpisodeFile(e.name);
       return { file: `${folder}/${e.name}`, number, label: number ? `${number}. bölüm` : e.name, subtitle: sub ? `${folder}/${sub.name}` : undefined };
     })
     .sort((a, b) => a.number - b.number || a.file.localeCompare(b.file, "tr", { numeric: true }));
 }
 
-const norm = (s: string) =>
+export const norm = (s: string) =>
   s
     .normalize("NFKD")
     .replace(/[̀-ͯ]/g, "")
@@ -268,7 +309,8 @@ const norm = (s: string) =>
 /** The library folder that belongs to an anime: the one chosen earlier in this browser, else a name match */
 export function matchFolder(animeId: number, names: string[], folders: string[]): string | null {
   const saved = savedFolder(animeId);
-  if (saved && folders.includes(saved)) return saved;
+  // Kayıtlı yol iç içe olabilir ('Seri/Sezon 1'); ilk parçası kütüphanede durduğu sürece geçerli
+  if (saved && folders.includes(saved.split("/")[0])) return saved;
   const wanted = names.filter(Boolean).map(norm);
   return folders.find((f) => wanted.includes(norm(f))) ?? null;
 }

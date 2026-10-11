@@ -17,17 +17,33 @@
             </div>
         </header>
 
+        <!-- Firefox'ta site izinleri kullanıcı onayı ister -->
+        <section id="perm-banner" class="mat-card md-section" hidden>
+            <p class="md-hint">Firefox kaynak sitelere erişim izni vermeni bekliyor. Verilmezse arama ve indirme çalışmaz.</p>
+            <div class="md-actions"><button id="perm-grant" class="mat-btn btn-primary">Site izinlerini ver</button></div>
+        </section>
+
         <!-- Kayıt yeri -->
         <section class="mat-card md-section">
             <div class="md-section-head"><h2>Kayıt yeri</h2></div>
             <div class="md-grid">
-                <label>İndirilenler altındaki klasör
+                <label>Nereye
+                    <select id="st-target" class="mat-input"><option value="local">Bu bilgisayar (İndirilenler)</option><option value="nas">NAS (kütüphane sunucusu)</option></select>
+                </label>
+                <label id="st-nas-url-l">NAS adresi
+                    <input id="st-nasUrl" class="mat-input" placeholder="https://spoonpi5.tail95e983.ts.net:8443">
+                </label>
+                <label id="st-nas-key-l">NAS anahtarı
+                    <input id="st-nasKey" class="mat-input" type="password" placeholder="--key değeri">
+                </label>
+                <label id="st-local-l">İndirilenler altındaki klasör
                     <input id="st-localDir" class="mat-input" placeholder="Kiroku/Manga">
                 </label>
             </div>
-            <p class="md-hint">CBZ'ler doğrudan bu bilgisayara (İndirilenler/&lt;klasör&gt;/&lt;Seri&gt;/) iner. Hiçbir sunucuya gönderilmez, başka yerde kopyası tutulmaz.</p>
+            <p class="md-hint">CBZ'ler doğrudan bu bilgisayara (İndirilenler/&lt;klasör&gt;/&lt;Seri&gt;/) iner. NAS seçilirse CBZ'ler Tailscale üzerinden kütüphane sunucusuna yüklenir (sunucu <code>--writable</code> ile açık olmalı).</p>
             <div class="md-actions">
                 <button id="st-save" class="mat-btn btn-primary">Kaydet</button>
+                <button id="st-test" class="mat-btn">NAS'ı dene</button>
                 <span id="st-status" class="md-status"></span>
             </div>
         </section>

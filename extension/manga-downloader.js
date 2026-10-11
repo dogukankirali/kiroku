@@ -4,7 +4,7 @@
 import { SOURCES, sourceById } from "./manga/sources.js";
 import { LANGUAGE_MODES, mergeChapters, buildChapterCbz, chapterFileName } from "./manga/downloader.js";
 import { fetchMangaMetadata, seriesJson } from "./manga/metadata.js";
-import { STORAGE_KEY, DEFAULT_STORAGE, createStorage } from "./manga/storage.js";
+import { STORAGE_KEY, DEFAULT_STORAGE, createStorage, testNas } from "./manga/storage.js";
 
 const $ = (id) => document.getElementById(id);
 const store = {
@@ -59,12 +59,68 @@ function log(message, kind = "") {
 }
 const setProgress = (ratio) => ($("progress").firstElementChild.style.width = `${Math.round(Math.min(1, Math.max(0, ratio)) * 100)}%`);
 
+// ------------------------------ Site izinleri (Firefox) ------------------------------
+// Firefox MV3'te host_permissions kurulumda otomatik verilmez; kullanıcı onayı bir tıklamayla istenmelidir.
+
+const manifestHosts = () => chrome.runtime.getManifest().host_permissions ?? [];
+const permissionsApi = () => (chrome.permissions && chrome.permissions.contains ? chrome.permissions : null);
+
+async function hasHosts(origins) {
+  try {
+    return await permissionsApi().contains({ origins });
+  } catch {
+    return true; // API yoksa (Chrome) izin zaten kurulumda verilmiştir
+  }
+}
+
+async function requestHosts(origins) {
+  try {
+    return await permissionsApi().request({ origins });
+  } catch {
+    return false;
+  }
+}
+
+async function initPermissions() {
+  if (!permissionsApi()) return;
+  const hosts = manifestHosts();
+  if (hosts.length && !(await hasHosts(hosts))) {
+    $("perm-banner").hidden = false;
+    $("perm-grant").addEventListener("click", async () => {
+      if (await requestHosts(hosts)) $("perm-banner").hidden = true;
+    });
+  }
+}
+
+/** NAS adresinin sitesi için izin (manifest'teki *.ts.net dışındaki adresler için de) */
+async function ensureNasPermission(url) {
+  if (!permissionsApi()) return true;
+  let origin;
+  try {
+    origin = `${new URL(url).origin}/*`;
+  } catch {
+    return false;
+  }
+  return (await hasHosts([origin])) || requestHosts([origin]);
+}
+
 // ------------------------------ Kayıt yeri ------------------------------
 
 let storageSettings = { ...DEFAULT_STORAGE };
 
 function readStorageForm() {
-  return { localDir: $("st-localDir").value.trim() || DEFAULT_STORAGE.localDir };
+  return {
+    target: $("st-target").value,
+    localDir: $("st-localDir").value.trim() || DEFAULT_STORAGE.localDir,
+    nasUrl: $("st-nasUrl").value.trim(),
+    nasKey: $("st-nasKey").value.trim(),
+  };
+}
+
+function showTarget() {
+  const nas = $("st-target").value === "nas";
+  for (const id of ["st-nas-url-l", "st-nas-key-l", "st-test"]) $(id).style.display = nas ? "" : "none";
+  $("st-local-l").style.display = nas ? "none" : "";
 }
 
 function setStatus(text, kind = "") {
@@ -74,9 +130,19 @@ function setStatus(text, kind = "") {
 
 async function initStorage() {
   const data = await store.get([STORAGE_KEY, "theme", "manga_lang_mode"]);
-  storageSettings = { localDir: data[STORAGE_KEY]?.localDir || DEFAULT_STORAGE.localDir };
+  storageSettings = { ...DEFAULT_STORAGE, ...(data[STORAGE_KEY] ?? {}) };
+  $("st-target").value = storageSettings.target;
+  $("st-nasUrl").value = storageSettings.nasUrl;
+  $("st-nasKey").value = storageSettings.nasKey;
+  $("st-target").addEventListener("change", showTarget);
+  $("st-test").addEventListener("click", async () => {
+    setStatus("Deneniyor…");
+    try {
+      if (!(await ensureNasPermission($("st-nasUrl").value.trim()))) throw new Error("Bu adrese erişim izni verilmedi"); await testNas(readStorageForm()); setStatus("NAS'a yazılabiliyor", "ok"); } catch (e) { setStatus(e.message, "err"); }
+  });
   document.body.dataset.theme = data.theme ?? "dark";
   $("st-localDir").value = storageSettings.localDir;
+  showTarget();
 
   $("lang-mode").innerHTML = Object.entries(LANGUAGE_MODES).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join("");
   $("lang-mode").value = data.manga_lang_mode ?? "tr-first";
@@ -84,6 +150,7 @@ async function initStorage() {
 
   $("st-save").addEventListener("click", async () => {
     storageSettings = readStorageForm();
+    if (storageSettings.target === "nas" && !(await ensureNasPermission(storageSettings.nasUrl))) return setStatus("Bu adrese erişim izni verilmedi", "err");
     // Eski sürümün sunucu ayarları (WebDAV) varsa silinir; artık hiçbir sunucuya bağlanılmıyor
     await store.set({ [STORAGE_KEY]: storageSettings });
     setStatus(`Kaydedildi: ${createStorage(storageSettings).label}`, "ok");
@@ -288,10 +355,32 @@ async function downloadSelected() {
   $("stop").disabled = true;
 }
 
+// ------------------------------ Güncele gel ------------------------------
+// Kiroku'daki "Güncele gel" düğmesi sayfayı ?update=1&q=<ad>&series=<klasör>&after=<son bölüm> ile açar:
+// açık kaynaklarda arar, birebir eşleşenlerle bölümleri birleştirir, kütüphanedeki son bölümden yenileri indirir.
+
+async function autoUpdate(params) {
+  const after = Number(params.get("after")) || 0;
+  $("q").value = params.get("q");
+  await search();
+  if (![...document.querySelectorAll("[data-pick]")].some((s) => s.value !== "-1")) {
+    return log("Hiçbir kaynakta birebir eşleşen seri bulunamadı. Kaynaktan seri seçip 'Bölümleri getir'e bas.", "err");
+  }
+  await loadChapters();
+  $("series-name").value = params.get("series") || $("series-name").value;
+  renderChapters();
+  const missing = checkboxes().filter((cb) => (chapters[cb.dataset.ch].number ?? -1) > after);
+  if (!missing.length) return log(`Yeni bölüm yok (kütüphanede son bölüm ${after}).`, "ok");
+  missing.forEach((cb) => (cb.checked = true));
+  log(`${missing.length} yeni bölüm bulundu (> ${after}), indiriliyor…`);
+  await downloadSelected();
+}
+
 // ------------------------------ Başlat ------------------------------
 
 renderSourceToggles();
-initStorage();
+initPermissions();
+const initDone = initStorage();
 $("search").addEventListener("click", search);
 $("q").addEventListener("keydown", (e) => e.key === "Enter" && search());
 $("select-range").addEventListener("click", selectRange);
@@ -303,3 +392,8 @@ $("stop").addEventListener("click", () => {
   stopRequested = true;
   $("stop").disabled = true;
 });
+
+{
+  const params = new URLSearchParams(location.search);
+  if (params.get("update") === "1" && params.get("q")) initDone.then(() => autoUpdate(params));
+}
