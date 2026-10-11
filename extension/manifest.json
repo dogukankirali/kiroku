@@ -6,6 +6,7 @@
   "permissions": ["storage", "activeTab", "scripting", "webRequest", "downloads", "declarativeNetRequestWithHostAccess"],
   "host_permissions": [
     "https://graphql.anilist.co/*",
+    "https://*.ts.net/*",
     "https://myanimelist.net/*",
     "https://turkanime.co/*",
     "https://www.turkanime.co/*",
