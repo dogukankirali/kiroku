@@ -36,12 +36,18 @@ type MangaRow = {
   notes: string | null;
   started_at: string | null;
   finished_at: string | null;
+  read_format?: string | null;
+  digital_chapter?: number | null;
+  digital_site?: string | null;
+  digital_url?: string | null;
+  digital_read_at?: string | null;
   in_list: number | null;
 };
 
 export const MANGA_COLUMNS = `m.id, m.name, m.english_name, m.status, m.format, m.total_chapters, m.total_volumes, m.mal_score,
   m.genres, m.cover, m.anilist_id, m.mal_id, m.mal_link, m.anilist_link, m.synced_at, m.mangadex_id, m.series_name,
   u.score, u.read_status, u.chapters_read, u.volumes_read, u.plan_to_read, u.notes, u.started_at, u.finished_at,
+  u.read_format, u.digital_chapter, u.digital_site, u.digital_url, u.digital_read_at,
   u.user_id IS NOT NULL AS in_list`;
 export const MANGA_FROM = `manga m LEFT JOIN user_manga u ON u.manga_id = m.id AND u.user_id = ?`;
 
@@ -71,6 +77,11 @@ export const toManga = (r: MangaRow) => ({
   notes: r.notes ?? "",
   startedAt: r.started_at ?? "",
   finishedAt: r.finished_at ?? "",
+  readFormat: r.read_format ?? "",
+  digitalChapter: r.digital_chapter ?? null,
+  digitalSite: r.digital_site ?? "",
+  digitalUrl: r.digital_url ?? "",
+  digitalReadAt: r.digital_read_at ?? "",
   inMyList: Boolean(r.in_list),
 });
 
@@ -120,6 +131,11 @@ type UserMangaFields = Partial<{
   notes: string;
   started_at: string | null;
   finished_at: string | null;
+  read_format: string | null;
+  digital_chapter: number | null;
+  digital_site: string | null;
+  digital_url: string | null;
+  digital_read_at: string | null;
 }>;
 
 /** Reads only the user fields present in the body; returns an error string on invalid input. */
@@ -140,6 +156,17 @@ function userFields(body: Record<string, unknown>): UserMangaFields | string {
   if (has("volumesRead")) out.volumes_read = Math.max(0, int(field(body, "volumesRead")));
   if (has("planToRead")) out.plan_to_read = bool(field(body, "planToRead")) ? 1 : 0;
   if (has("notes")) out.notes = str(field(body, "notes"));
+  if (has("readFormat")) {
+    const rf = str(field(body, "readFormat")).toUpperCase();
+    if (rf && rf !== "DIGITAL" && rf !== "PHYSICAL") return "Okuma biçimi DIGITAL ya da PHYSICAL olmalı";
+    out.read_format = rf || null;
+  }
+  if (has("digitalChapter")) {
+    const raw = field(body, "digitalChapter");
+    out.digital_chapter = raw === null || raw === "" ? null : Math.max(0, num(raw));
+  }
+  if (has("digitalSite")) out.digital_site = str(field(body, "digitalSite")).trim() || null;
+  if (has("digitalUrl")) out.digital_url = str(field(body, "digitalUrl")).trim() || null;
   for (const [key, col] of [["startedAt", "started_at"], ["finishedAt", "finished_at"]] as const) {
     if (!has(key)) continue;
     const v = str(field(body, key)).trim();
@@ -294,6 +321,55 @@ manga.put("/manga/:id{[0-9]+}", requireAuth, async (c) => {
       .run();
   }
   await upsertUserManga(db, user.userId, id, uf).run();
+  return c.json(await mangaById(c, id));
+});
+
+// Eklentiden dijital okuma: { mangaId?, title, chapter, url }. mangaId yoksa ad/İngilizce adla birebir aranır;
+// bulunamazsa 404 ile benzer adlar (candidates) döner, eklenti kullanıcıya seçtirip mangaId ile tekrar dener.
+// Son okunan bölüm, site ve adres yazılır; okuma biçimi boşsa dijital olur, okunan bölüm geri gitmez.
+manga.post("/manga/digital-progress", requireAuth, async (c) => {
+  const body = await readJson(c);
+  const chapter = num(field(body, "chapter"));
+  if (!(chapter > 0)) return c.json({ message: "Bölüm numarası gerekli" }, 400);
+  const url = str(field(body, "url")).trim();
+  const title = str(field(body, "title")).trim();
+  const db = c.env.DB;
+  let id = int(field(body, "mangaId"), 0);
+  if (id && !(await db.prepare("SELECT id FROM manga WHERE id = ?").bind(id).first())) id = 0;
+  if (!id && title) {
+    const hit = await db
+      .prepare("SELECT id FROM manga WHERE name = ? COLLATE NOCASE OR english_name = ? COLLATE NOCASE LIMIT 1")
+      .bind(title, title)
+      .first<{ id: number }>();
+    id = hit?.id ?? 0;
+  }
+  if (!id) {
+    const words = title.split(/\s+/).filter((w) => w.length > 2).slice(0, 3);
+    const like = words.length ? words.map(() => "(name LIKE ? OR english_name LIKE ?)").join(" AND ") : "0";
+    const { results } = await db
+      .prepare(`SELECT id, name, english_name, cover FROM manga WHERE ${like} ORDER BY LOWER(name) LIMIT 8`)
+      .bind(...words.flatMap((w) => [`%${w}%`, `%${w}%`]))
+      .all<{ id: number; name: string; english_name: string | null; cover: string | null }>();
+    return c.json({ message: "Kiroku'da bu manga bulunamadı", candidates: results.map((r) => ({ id: r.id, name: r.name, englishName: r.english_name ?? "", cover: r.cover ?? "" })) }, 404);
+  }
+  let site = "";
+  try {
+    site = new URL(url).hostname.replace(/^www\./, "");
+  } catch {}
+  const userId = c.get("user")!.userId;
+  await db
+    .prepare(
+      `INSERT INTO user_manga (user_id, manga_id, read_format, digital_chapter, digital_site, digital_url, digital_read_at, chapters_read)
+       VALUES (?, ?, 'DIGITAL', ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?)
+       ON CONFLICT (user_id, manga_id) DO UPDATE SET
+         read_format = COALESCE(read_format, 'DIGITAL'),
+         digital_chapter = excluded.digital_chapter, digital_site = excluded.digital_site, digital_url = excluded.digital_url,
+         digital_read_at = excluded.digital_read_at,
+         chapters_read = MAX(chapters_read, excluded.chapters_read),
+         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
+    )
+    .bind(userId, id, chapter, site || null, url || null, Math.floor(chapter))
+    .run();
   return c.json(await mangaById(c, id));
 });
 

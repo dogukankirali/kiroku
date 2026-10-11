@@ -31,3 +31,5 @@ export const progressText = (read: number, total: number) => `${read}/${total ||
 
 export const chapterLabel = (ch: Pick<Chapter, "number" | "title" | "volume">) =>
   `${ch.volume ? `Cilt ${ch.volume} · ` : ""}Bölüm ${ch.number}${ch.title ? ` — ${ch.title}` : ""}`;
+
+export const READ_FORMAT_LABEL: Record<"DIGITAL" | "PHYSICAL", string> = { DIGITAL: "Dijital", PHYSICAL: "Fiziksel" };

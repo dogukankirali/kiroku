@@ -31,10 +31,17 @@ export interface Manga {
   notes: string;
   startedAt: string;
   finishedAt: string;
+  /** "DIGITAL", "PHYSICAL" ya da "" (bilinmiyor) */
+  readFormat: "" | "DIGITAL" | "PHYSICAL";
+  /** Dijital okumada kalınan bölüm (eklenti yazar); null = yok */
+  digitalChapter: number | null;
+  digitalSite: string;
+  digitalUrl: string;
+  digitalReadAt: string;
   inMyList: boolean;
 }
 
-export type MangaInput = Partial<Omit<Manga, "id" | "syncedAt" | "inMyList" | "mangadexId">>;
+export type MangaInput = Partial<Omit<Manga, "id" | "syncedAt" | "inMyList" | "mangadexId" | "digitalReadAt">>;
 
 export interface MangaQuery {
   q?: string;

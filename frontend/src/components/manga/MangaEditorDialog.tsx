@@ -25,7 +25,7 @@ import { alpha } from "@mui/material/styles";
 import { searchManga, type AniListManga } from "../../Services/anilist";
 import { MangaService, errorText, fromAniList, type Manga, type MangaInput } from "../../Services/MangaService";
 import { palette } from "../../theme/customTheme";
-import { FORMAT_LABEL, PUB_STATUS_LABEL, READ_STATUS_LABEL } from "./mangaLabels";
+import { FORMAT_LABEL, PUB_STATUS_LABEL, READ_FORMAT_LABEL, READ_STATUS_LABEL } from "./mangaLabels";
 
 type Props = {
   open: boolean;
@@ -205,6 +205,14 @@ export default function MangaEditorDialog({ open, manga, isAdmin, onClose, onSav
                 onChange={(e) => set("chaptersRead", Math.max(0, Number(e.target.value)))} />
               <TextField type="number" label={`Okunan cilt${form.totalVolumes ? ` / ${form.totalVolumes}` : ""}`} value={form.volumesRead ?? 0}
                 onChange={(e) => set("volumesRead", Math.max(0, Number(e.target.value)))} />
+              <TextField select label="Okuma biçimi" value={form.readFormat ?? ""} onChange={(e) => set("readFormat", e.target.value as MangaInput["readFormat"])}>
+                <MenuItem value="">—</MenuItem>
+                {Object.entries(READ_FORMAT_LABEL).map(([k, v]) => (
+                  <MenuItem key={k} value={k}>{v}</MenuItem>
+                ))}
+              </TextField>
+              <TextField type="number" label="Dijitalde kalınan bölüm" value={form.digitalChapter ?? ""} inputProps={{ step: 0.5, min: 0 }}
+                onChange={(e) => set("digitalChapter", e.target.value === "" ? null : Math.max(0, Number(e.target.value)))} />
               <TextField type="date" label="Başlama" InputLabelProps={{ shrink: true }} value={form.startedAt ?? ""} onChange={(e) => set("startedAt", e.target.value)} />
               <TextField type="date" label="Bitiş" InputLabelProps={{ shrink: true }} value={form.finishedAt ?? ""} onChange={(e) => set("finishedAt", e.target.value)} />
             </Box>

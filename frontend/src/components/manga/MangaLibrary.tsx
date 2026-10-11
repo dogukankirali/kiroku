@@ -49,7 +49,7 @@ import { useDelayedFlag } from "../../lib/useDelayedFlag";
 import MangaEditorDialog from "./MangaEditorDialog";
 import LibrarySyncDialog from "./LibrarySyncDialog";
 import FolderSyncRoundedIcon from "@mui/icons-material/FolderCopyOutlined";
-import { PUB_STATUS_LABEL, READ_STATUS_COLOR, READ_STATUS_LABEL, progressText } from "./mangaLabels";
+import { PUB_STATUS_LABEL, READ_FORMAT_LABEL, READ_STATUS_COLOR, READ_STATUS_LABEL, progressText } from "./mangaLabels";
 
 type View = "grid" | "table";
 type Toast = { severity: "success" | "error" | "info"; text: string } | null;
@@ -121,6 +121,8 @@ const COLUMNS: { key: string; label: string; sort?: string; align?: "right" }[] 
   { key: "series", label: "Seri" },
   { key: "status", label: "Yayın", sort: "status" },
   { key: "readStatus", label: "Durumum", sort: "read-status" },
+  { key: "readFormat", label: "Okuma" },
+  { key: "digital", label: "Dijital bölüm", align: "right" },
   { key: "progress", label: "Bölüm", sort: "progress", align: "right" },
   { key: "volumes", label: "Cilt", align: "right" },
   { key: "score", label: "Puanım", sort: "score", align: "right" },
@@ -345,6 +347,16 @@ export default function MangaLibrary() {
                   <TableCell>{m.seriesName || "—"}</TableCell>
                   <TableCell>{PUB_STATUS_LABEL[m.status] ?? m.status}</TableCell>
                   <TableCell><ReadStatusChip status={m.readStatus} /></TableCell>
+                  <TableCell>{m.readFormat ? READ_FORMAT_LABEL[m.readFormat] : "—"}</TableCell>
+                  <TableCell align="right" onClick={(e) => m.digitalUrl && e.stopPropagation()}>
+                    {m.digitalChapter != null ? (
+                      m.digitalUrl ? (
+                        <Tooltip title={`${m.digitalSite || "Okuma sitesi"} · kaldığın bölümü aç`}>
+                          <a href={m.digitalUrl} target="_blank" rel="noopener noreferrer" style={{ color: palette.primary }}>{m.digitalChapter}</a>
+                        </Tooltip>
+                      ) : m.digitalChapter
+                    ) : "—"}
+                  </TableCell>
                   <TableCell align="right">{progressText(m.chaptersRead, m.totalChapters)}</TableCell>
                   <TableCell align="right">{progressText(m.volumesRead, m.totalVolumes)}</TableCell>
                   <TableCell align="right">{m.score || "—"}</TableCell>

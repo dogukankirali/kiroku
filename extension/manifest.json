@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Kiroku — Tracker & Sync",
-  "version": "16.5",
+  "version": "16.6",
   "description": "Anime takip (skip sayacı, puan, istatistik) + Kiroku Sync: izleme sitelerinde otomatik bölüm ve watchlist takibi.",
   "permissions": ["storage", "activeTab", "scripting", "webRequest", "downloads", "declarativeNetRequestWithHostAccess"],
   "host_permissions": [
@@ -39,7 +39,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "js": ["content.js", "manga-reading.js"],
       "all_frames": true
     }
   ]
