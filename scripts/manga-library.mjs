@@ -401,12 +401,15 @@ createServer(async (req, res) => {
   try {
     const info = await stat(target);
     if (info.isDirectory()) {
-      const entries = await Promise.all(
-        (await readdir(target)).map(async (name) => {
-          const s = await stat(join(target, name));
-          return { name, size: s.size, url: `./${encodeURIComponent(name)}${s.isDirectory() ? "/" : ""}`, mod_time: s.mtime.toISOString(), is_dir: s.isDirectory() };
-        })
-      );
+      // A broken symlink or a file removed mid-listing must not turn the whole folder into a 404
+      const entries = (
+        await Promise.all(
+          (await readdir(target)).map(async (name) => {
+            const s = await stat(join(target, name)).catch(() => null);
+            return s && { name, size: s.size, url: `./${encodeURIComponent(name)}${s.isDirectory() ? "/" : ""}`, mod_time: s.mtime.toISOString(), is_dir: s.isDirectory() };
+          })
+        )
+      ).filter(Boolean);
       res.writeHead(200, { ...cors, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
       return res.end(JSON.stringify(entries));
     }
