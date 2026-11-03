@@ -15,6 +15,7 @@ import FolderOpenRoundedIcon from "@mui/icons-material/FolderOpenRounded";
 import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 import { AnimeService } from "../../Services/AnimeServices";
 import { palette } from "../../theme/customTheme";
+import { stateGet, stateSet, stateSetJson, stateSync } from "../../lib/userState";
 import SalonPlayer from "../../components/salon/SalonPlayer";
 import SubtitleFinder from "../../components/salon/SubtitleFinder";
 import {
@@ -43,21 +44,17 @@ import {
 } from "../../lib/videoLibrary";
 
 const card = { p: { xs: 2, md: 2.5 }, borderRadius: "16px", backgroundColor: palette.surface, border: `1px solid ${alpha(palette.overlay, 0.06)}` };
-const posKey = (animeId: number, file: string) => `kirokuSalonPos:${animeId}:${file}`;
+const posKey = (animeId: number, file: string) => `salon.pos:${animeId}:${file}`;
+const contKey = (animeId: number) => `salon.cont:${animeId}`;
 const WATCHED_AT = 0.9;
 
 function readPos(key: string) {
-  try {
-    return Number(localStorage.getItem(key)) || 0;
-  } catch {
-    return 0;
-  }
+  // Legacy per-browser key from before positions were synced to the account
+  const legacy = key.startsWith("salon.pos:") ? (() => { try { return localStorage.getItem(`kirokuSalonPos:${key.slice(10)}`); } catch { return null; } })() : null;
+  return Number(stateGet(key) ?? legacy) || 0;
 }
 function writePos(key: string, seconds: number | null) {
-  try {
-    if (seconds === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, String(Math.floor(seconds)));
-  } catch {}
+  stateSet(key, seconds === null ? null : String(Math.floor(seconds)));
 }
 
 /** Video kütüphanesi ayarı: HTTP sunucu (adres + isteğe bağlı erişim anahtarı) ya da bu sekmede seçilen klasör */
@@ -131,6 +128,11 @@ function Salon() {
   const epParam = params.get("ep");
 
   const [anime, setAnime] = useState<TEATable.IAnime | null>(null);
+  // Account-synced preferences/positions are pulled once before the player reads them (max 1.5 s)
+  const [synced, setSynced] = useState(false);
+  useEffect(() => {
+    Promise.race([stateSync("salon."), new Promise((r) => setTimeout(r, 1500))]).finally(() => setSynced(true));
+  }, []);
   const [folders, setFolders] = useState<string[] | null>(null);
   const [folder, setFolder] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<Episode[] | null>(null);
@@ -307,13 +309,15 @@ function Salon() {
       if (!current || !duration) return;
       if (time / duration >= WATCHED_AT) {
         writePos(posKey(id, current.file), null);
+        stateSet(contKey(id), null);
         markWatched(current);
       } else if (Date.now() - lastSave.current > 4000) {
         lastSave.current = Date.now();
         writePos(posKey(id, current.file), time);
+        if (anime) stateSetJson(contKey(id), { animeId: id, title: String(anime.Name), cover: anime.Cover || "", file: current.file, label: current.label, pos: Math.floor(time), dur: Math.floor(duration), t: Date.now() });
       }
     },
-    [current, id, markWatched]
+    [current, id, markWatched, anime]
   );
 
   if (error) {
@@ -417,7 +421,7 @@ function Salon() {
       {anime && current ? (
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: theater ? "1fr" : "minmax(0, 1fr) 320px" }, gap: 2, alignItems: "start" }}>
           <Box sx={{ mx: theater ? { xs: -1.5, sm: -2, md: -3 } : 0 }}>
-            {media ? (
+            {media && synced ? (
               <SalonPlayer
                 key={current.file}
                 src={media.src}

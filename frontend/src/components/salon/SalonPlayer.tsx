@@ -7,6 +7,7 @@
 // dosyalarda yalnızca ilk sesi çaldığı için başka bir ses seçilince video aynen, ses AAC'ye çevrilmiş bir akış açılır;
 // bu akışta sarma yeni bir akış başlatır (en yakın anahtar kareden). Ok tuşuyla art arda sarma tek bir sarmaya birleştirilir.
 
+import { stateGetJson, stateSetJson } from "../../lib/userState";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { shiftVtt, type MediaTrack, type MediaTracks } from "../../lib/videoLibrary";
 import "./salon.css";
@@ -63,8 +64,8 @@ type SubSel = { kind: "off" } | { kind: "external" } | { kind: "embedded"; index
 type Prefs = { volume?: number; captions?: boolean; audioLang?: string; subLang?: string; compatHeight?: number; subStyle?: Partial<SubStyle> };
 
 /** Subtitle look, drawn by us (not the browser) so it behaves the same in every browser */
-type SubStyle = { size: number; bottom: number; bg: number; color: string };
-const DEFAULT_SUB_STYLE: SubStyle = { size: 1, bottom: 6, bg: 0.6, color: "#ffffff" };
+type SubStyle = { size: number; bottom: number; bg: number; color: string; weight: number };
+const DEFAULT_SUB_STYLE: SubStyle = { size: 1, bottom: 6, bg: 0.6, color: "#ffffff", weight: 600 };
 const SUB_COLORS = [
   { label: "Beyaz", value: "#ffffff" },
   { label: "Sarı", value: "#ffe14d" },
@@ -98,7 +99,8 @@ function cueHtml(text: string) {
 
 function readPrefs(): Prefs {
   try {
-    return JSON.parse(localStorage.getItem("kirokuSalon") ?? "{}") as Prefs;
+    // "salon.prefs" is synced to the account; "kirokuSalon" is the old per-browser copy
+    return stateGetJson<Prefs | null>("salon.prefs", null) ?? (JSON.parse(localStorage.getItem("kirokuSalon") ?? "{}") as Prefs);
   } catch {
     return {};
   }
@@ -230,9 +232,7 @@ export default function SalonPlayer({
   totalRef.current = total;
 
   const savePrefs = (patch: Partial<Prefs>) => {
-    try {
-      localStorage.setItem("kirokuSalon", JSON.stringify({ ...readPrefs(), ...patch }));
-    } catch {}
+    stateSetJson("salon.prefs", { ...readPrefs(), ...patch });
   };
 
   // Ses ve altyazı tercihleri tarayıcıda hatırlanır
@@ -742,7 +742,7 @@ export default function SalonPlayer({
       {subActive && activeCues.length ? (
         <div
           className={`sub-overlay${idle && !paused ? "" : " lifted"}`}
-          style={{ bottom: `${subStyle.bottom}%`, fontSize: `calc(${subStyle.size} * clamp(14px, min(2.3cqw, 3.4vh), 34px))`, color: subStyle.color }}
+          style={{ bottom: `${subStyle.bottom}%`, fontSize: `calc(${subStyle.size} * clamp(14px, min(2.3cqw, 3.4vh), 34px))`, color: subStyle.color, fontWeight: subStyle.weight }}
         >
           {activeCues.map((c, i) => (
             <span key={i} style={{ background: `rgba(0,0,0,${subStyle.bg})` }} dangerouslySetInnerHTML={{ __html: cueHtml(c) }} />
@@ -828,6 +828,11 @@ export default function SalonPlayer({
                 <span>Konum</span>
                 <button onClick={() => changeSubStyle({ bottom: clampNum(subStyle.bottom - 2, 0, 60) })}>Aşağı</button>
                 <button onClick={() => changeSubStyle({ bottom: clampNum(subStyle.bottom + 2, 0, 60) })}>Yukarı</button>
+              </div>
+              <div className="settings-row">
+                <span>Kalınlık {subStyle.weight}</span>
+                <button onClick={() => changeSubStyle({ weight: clampNum(subStyle.weight - 100, 300, 900) })}>İnce</button>
+                <button onClick={() => changeSubStyle({ weight: clampNum(subStyle.weight + 100, 300, 900) })}>Kalın</button>
               </div>
               <div className="settings-row">
                 <span>Arka plan {Math.round(subStyle.bg * 100)}%</span>

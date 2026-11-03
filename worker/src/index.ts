@@ -12,6 +12,7 @@ import { books } from "./books";
 import { library } from "./library";
 import { chapters } from "./chapters";
 import { profileRoutes } from "./profile";
+import { stateRoutes } from "./state";
 import { users } from "./users";
 import type { AppEnv } from "./util";
 import { watchlist } from "./watchlist";
@@ -37,6 +38,7 @@ api.route("/", coverRoutes);
 api.route("/", titleRoutes);
 api.route("/", googleRoutes);
 api.route("/", profileRoutes);
+api.route("/", stateRoutes);
 api.route("/", airingRoutes);
 
 const app = new Hono<AppEnv>();
