@@ -445,3 +445,85 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
 });
+
+// ============================================================
+// Tarayıcılar arası ayar senkronu: eklenti ayarları Kiroku hesabında "ext.settings" olarak tutulur (/api/state).
+// Son yazan kazanır. Giriş bilgisi (service_url, auth_token) ve NAS erişim anahtarı senkronlanmaz.
+// ============================================================
+const SYNC_KEYS = ["theme", "tempo", "overlayMode", "manga_sites", "manga_map", "manga_lang_mode", "manga_storage", "watch_prompt"];
+const SYNC_STATE_KEY = "ext.settings";
+const SYNC_MAX_BYTES = 60000;
+let syncPushTimer = null;
+let applyingRemote = false;
+
+function syncCreds() {
+    return new Promise((resolve) =>
+        chrome.storage.local.get(["service_url", "auth_token", "sync_t"], (r) => {
+            const url = (r.service_url || "").trim().replace(/\/+$/, "");
+            resolve(url && r.auth_token ? { url, token: r.auth_token, t: Number(r.sync_t) || 0 } : null);
+        })
+    );
+}
+
+function withoutSecrets(data) {
+    const copy = { ...data };
+    if (copy.manga_storage) copy.manga_storage = { ...copy.manga_storage, nasKey: "" };
+    return copy;
+}
+
+async function pushSettings() {
+    const creds = await syncCreds();
+    if (!creds) return;
+    const data = withoutSecrets(await new Promise((resolve) => chrome.storage.local.get(SYNC_KEYS, resolve)));
+    const t = Date.now();
+    const value = JSON.stringify({ t, data });
+    if (value.length > SYNC_MAX_BYTES) return console.warn("Kiroku: ayarlar senkron için çok büyük, atlandı");
+    try {
+        const res = await fetch(`${creds.url}/api/state`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json", ...authHeader(creds.token) },
+            body: JSON.stringify({ items: [{ key: SYNC_STATE_KEY, value }] }),
+            credentials: "omit",
+        });
+        if (res.ok) chrome.storage.local.set({ sync_t: t });
+    } catch {
+        /* çevrimdışı: bir sonraki değişiklikte ya da açılışta tekrar denenir */
+    }
+}
+
+async function pullSettings() {
+    const creds = await syncCreds();
+    if (!creds) return;
+    try {
+        const res = await fetch(`${creds.url}/api/state?prefix=${encodeURIComponent(SYNC_STATE_KEY)}`, { headers: authHeader(creds.token), credentials: "omit" });
+        if (!res.ok) return;
+        const item = ((await res.json()).data || []).find((i) => i.key === SYNC_STATE_KEY);
+        if (!item) return pushSettings(); // hesapta henüz yok: bu tarayıcınınkini yükle
+        const remote = JSON.parse(item.value);
+        if (!remote || !remote.data) return;
+        if (remote.t <= creds.t) {
+            // Bu tarayıcıda senkrondan sonra değişiklik varsa (sync_t eski kaldıysa) zaten onChanged gönderir
+            return;
+        }
+        const local = await new Promise((resolve) => chrome.storage.local.get(["manga_storage"], resolve));
+        const incoming = { ...remote.data };
+        if (incoming.manga_storage) incoming.manga_storage = { ...incoming.manga_storage, nasKey: local.manga_storage?.nasKey || "" };
+        applyingRemote = true;
+        chrome.storage.local.set({ ...incoming, sync_t: remote.t }, () => setTimeout(() => (applyingRemote = false), 500));
+    } catch {
+        /* geçersiz ya da erişilemeyen yanıt: yerel ayarlar kullanılır */
+    }
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || applyingRemote) return;
+    if (!SYNC_KEYS.some((k) => k in changes)) return;
+    clearTimeout(syncPushTimer);
+    syncPushTimer = setTimeout(pushSettings, 3000);
+});
+chrome.runtime.onStartup.addListener(pullSettings);
+chrome.runtime.onInstalled.addListener(pullSettings);
+// Giriş yapılınca (auth_token geldiğinde) ilk çekme
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes.auth_token?.newValue && changes.auth_token.newValue !== changes.auth_token.oldValue) pullSettings();
+});
