@@ -498,6 +498,41 @@ export async function updateEpisode(c: Ctx) {
 
 anime.all("/anime/update-episode", requireAuth, updateEpisode);
 
+// Bulk scores from outside (browser bookmarks "7.5 / 10 - Title"): body { items: [{ title, score }], dryRun? }.
+// Titles are matched against name / english_name ignoring case and punctuation; only the score is written
+// (watch progress is left alone). dryRun only reports what would match.
+const normTitle = (t: string) => t.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\p{L}\p{N}]+/gu, "");
+
+anime.post("/anime/import-scores", requireAuth, async (c) => {
+  const body = await readJson(c);
+  const items = (Array.isArray(body.items) ? (body.items as Record<string, unknown>[]) : []).slice(0, 300);
+  if (!items.length) return c.json({ message: "items boş" }, 400);
+  const dryRun = bool(field(body, "dryRun"));
+  const db = c.env.DB;
+  const { results } = await db.prepare("SELECT id, name, english_name FROM animes").all<{ id: number; name: string; english_name: string | null }>();
+  const byNorm = new Map<string, { id: number; name: string }>();
+  for (const r of results) {
+    for (const n of [r.name, r.english_name ?? ""]) {
+      const key = normTitle(n);
+      if (key && !byNorm.has(key)) byNorm.set(key, { id: r.id, name: r.name });
+    }
+  }
+  const userId = c.get("user")!.userId;
+  const out: { title: string; score: number; status: "ok" | "notfound"; name?: string }[] = [];
+  for (const item of items) {
+    const title = str(field(item, "title")).trim();
+    const score = Math.min(10, Math.max(0, num(field(item, "score"))));
+    const hit = byNorm.get(normTitle(title));
+    if (!title || !hit) {
+      out.push({ title, score, status: "notfound" });
+      continue;
+    }
+    if (!dryRun) await upsertUserAnime(db, userId, hit.id, { score }).run();
+    out.push({ title, score, status: "ok", name: hit.name });
+  }
+  return c.json({ dryRun, data: out });
+});
+
 // Basit CSV ayrıştırıcı (tırnaklı alanları destekler)
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];

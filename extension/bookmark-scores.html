@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Kiroku — Yer imlerinden puan aktar</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="manga-downloader.css">
+</head>
+<body data-theme="dark">
+    <div class="md-page">
+        <header class="md-header">
+            <img src="icon48.png" alt="" width="28" height="28">
+            <div>
+                <h1>Yer imlerinden puan aktar</h1>
+                <p>Seçtiğin yer imi klasöründeki "7.5 / 10 - Anime Adı" başlıklarını okur, adı Kiroku'daki animelerle eşleştirip yalnızca puanı yazar (izleme ilerlemesine dokunmaz).</p>
+            </div>
+        </header>
+
+        <section class="mat-card md-section">
+            <div class="md-section-head"><h2>1. Klasör</h2></div>
+            <p class="md-hint" id="perm-hint">Yer imlerini okumak için tarayıcı izin ister.</p>
+            <div class="md-actions">
+                <button id="grant" class="mat-btn btn-primary">Yer imlerine erişim ver</button>
+            </div>
+            <div class="md-grid" id="folder-row" hidden>
+                <label>Klasör <select id="folder"></select></label>
+            </div>
+            <div class="md-actions" id="scan-row" hidden>
+                <button id="scan" class="mat-btn btn-primary">Tara ve eşleştir</button>
+            </div>
+        </section>
+
+        <section class="mat-card md-section" id="result" hidden>
+            <div class="md-section-head"><h2>2. Önizleme</h2></div>
+            <p class="md-hint" id="summary"></p>
+            <div style="max-height: 420px; overflow: auto">
+                <table style="width:100%; border-collapse: collapse; font-size: 13px" id="rows"></table>
+            </div>
+            <div class="md-actions">
+                <button id="apply" class="mat-btn btn-primary">Eşleşenlerin puanını yaz</button>
+            </div>
+            <p class="md-hint" id="done"></p>
+        </section>
+    </div>
+    <script src="bookmark-scores.js"></script>
+</body>
+</html>
