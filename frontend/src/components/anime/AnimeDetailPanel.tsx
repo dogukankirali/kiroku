@@ -10,7 +10,7 @@ import OpenInNewRoundedIcon from "@mui/icons-material/OpenInNewRounded";
 import { GenreChips } from "../Common/GenreChip";
 import { useCoverColor } from "../../hooks/useCoverColor";
 import { hexToRgbTriplet, palette } from "../../theme/customTheme";
-import { ANIME_STATUS_TR, Pill, Stat, formatNextEpisode, getCoverSrc, getStatusInfo } from "./AnimeDetailModal";
+import { ANIME_STATUS_TR, Pill, SalonLink, Stat, formatNextEpisode, getCoverSrc, getStatusInfo } from "./AnimeDetailModal";
 
 /** Tabloda satır genişletilince görünen özet paneli */
 export default function AnimeDetailPanel({ data }: { data: TEATable.IAnime; update?: unknown }) {
@@ -144,6 +144,7 @@ export default function AnimeDetailPanel({ data }: { data: TEATable.IAnime; upda
               >
                 Detay sayfası
               </Box>
+              <SalonLink id={a.ID} />
               {links.map((l) => (
                 <Box
                   key={l.label}

@@ -321,6 +321,7 @@ export default function AnimeDetailModal({
                     >
                       Detay sayfası
                     </Box>
+              <SalonLink id={a.ID} />
                     {links.map((l) => (
                       <Tooltip key={l.label} title={l.href}>
                         <Box
@@ -365,5 +366,39 @@ export default function AnimeDetailModal({
       </motion.div>
     </Box>,
     document.body
+  );
+}
+
+/** "Salon'da izle" button shared by the grid modal and the table panel */
+export function SalonLink({ id }: { id: number }) {
+  const href = `/salon?id=${id}`;
+  return (
+    <Box
+      component="a"
+      href={href}
+      onClick={(e: React.MouseEvent) => {
+        if (e.metaKey || e.ctrlKey || e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        window.location.assign(href);
+      }}
+      sx={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 0.5,
+        height: 30,
+        px: 1.25,
+        borderRadius: "8px",
+        fontSize: "0.8rem",
+        fontWeight: 600,
+        color: palette.text,
+        textDecoration: "none",
+        backgroundColor: alpha(palette.overlay, 0.07),
+        border: `1px solid ${alpha(palette.overlay, 0.1)}`,
+        "&:hover": { backgroundColor: alpha(palette.overlay, 0.12) },
+      }}
+    >
+      Salon'da izle
+    </Box>
   );
 }
