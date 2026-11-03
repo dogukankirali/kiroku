@@ -4,6 +4,7 @@
 // option, fit width/height, keyboard and tap navigation, preloading, previous/next chapter. Finishing a
 // chapter saves user_manga.chapters_read; the page position is remembered per chapter for resuming.
 
+import { stateGetJson, stateSetJson, stateSync } from "../../../lib/userState";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -24,8 +25,13 @@ type Mode = "vertical" | "paged";
 type Fit = "width" | "height";
 type Settings = { mode: Mode; rtl: boolean; fit: Fit };
 
-const SETTINGS_KEY = "kirokuReader";
-const posKey = (chId: number) => `kirokuReaderPos:${chId}`;
+const SETTINGS_KEY = "read.settings"; // synced to the account ("kirokuReader" is the old per-browser copy)
+const posKey = (chId: number) => `read.pos:${chId}`;
+const contKey = (mangaId: number) => `read.cont:${mangaId}`;
+
+// Account-synced reader state is pulled once per page load (max 1.5 s) before positions are read
+let readSync: Promise<void> | null = null;
+const ensureSynced = () => (readSync ??= Promise.race([stateSync("read."), new Promise((r) => setTimeout(r, 1500))]).then(() => undefined));
 const DEFAULTS: Settings = { mode: "vertical", rtl: false, fit: "width" };
 
 function readStore<T>(key: string, fallback: T): T {
@@ -99,11 +105,13 @@ function Reader() {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const restored = useRef(false);
 
-  useEffect(() => setSettings(readStore(SETTINGS_KEY, DEFAULTS)), []);
+  useEffect(() => {
+    ensureSynced().then(() => setSettings({ ...DEFAULTS, ...readStore<Partial<Settings>>("kirokuReader", {}), ...stateGetJson<Partial<Settings>>(SETTINGS_KEY, {}) }));
+  }, []);
   const update = (s: Partial<Settings>) =>
     setSettings((prev) => {
       const next = { ...prev, ...s };
-      writeStore(SETTINGS_KEY, next);
+      stateSetJson(SETTINGS_KEY, next);
       return next;
     });
 
@@ -132,12 +140,12 @@ function Reader() {
     restored.current = false;
     pageRefs.current = [];
     setLibError(null);
-    pageSource(chapter)
-      .then((s) => {
+    Promise.all([pageSource(chapter), ensureSynced()])
+      .then(([s]) => {
         created = s;
         if (!alive) return s.dispose();
         setSrc(s);
-        const saved = readStore<{ page: number }>(posKey(chapter.id), { page: 0 }).page;
+        const saved = stateGetJson<{ page: number } | null>(posKey(chapter.id), null)?.page ?? readStore<{ page: number }>(`kirokuReaderPos:${chapter.id}`, { page: 0 }).page;
         setPage(Math.min(Math.max(0, saved), s.count - 1));
       })
       .catch((e) => {
@@ -170,7 +178,10 @@ function Reader() {
   // Remember position; reaching the last page marks the chapter as read (once)
   useEffect(() => {
     if (!src || !chapter) return;
-    writeStore(posKey(chapter.id), page > 0 && page < src.count - 1 ? { page } : null);
+    const partial = page > 0 && page < src.count - 1;
+    stateSetJson(posKey(chapter.id), partial ? { page } : null);
+    // "Continue reading" entry for the home page: one per manga, dropped once the chapter is finished
+    if (manga) stateSetJson(contKey(mangaId), partial ? { mangaId, title: manga.name, cover: manga.cover, chapterId: chapter.id, number: chapter.number, page, count: src.count, t: Date.now() } : null);
     preload(src, page + 1, settings.mode === "paged" ? 3 : 4);
     if (page >= src.count - 1 && !finished) {
       setFinished(true);
@@ -178,7 +189,7 @@ function Reader() {
         MangaService.saveProgress(mangaId, Math.floor(chapter.number)).then(setManga).catch(() => {});
       }
     }
-  }, [page, src, chapter, finished, manga?.chaptersRead, mangaId, settings.mode]);
+  }, [page, src, chapter, finished, manga, mangaId, settings.mode]);
 
   // Vertical mode: restore the scroll position once, then follow the page in view
   useEffect(() => {

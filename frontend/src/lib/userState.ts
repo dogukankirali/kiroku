@@ -89,3 +89,20 @@ export async function stateSync(prefix = ""): Promise<void> {
     /* offline: the local copy is used */
   }
 }
+
+/** Local copy of every key starting with `prefix` (call stateSync first to include other devices' writes). */
+export function stateList<T>(prefix: string): T[] {
+  const out: T[] = [];
+  if (typeof window === "undefined") return out;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const name = localStorage.key(i);
+      if (!name?.startsWith(PREFIX + prefix)) continue;
+      const stored = readStored(name.slice(PREFIX.length));
+      if (stored) out.push(JSON.parse(stored.v) as T);
+    }
+  } catch {
+    /* unreadable entries are skipped */
+  }
+  return out;
+}

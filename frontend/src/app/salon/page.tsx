@@ -314,7 +314,7 @@ function Salon() {
       } else if (Date.now() - lastSave.current > 4000) {
         lastSave.current = Date.now();
         writePos(posKey(id, current.file), time);
-        if (anime) stateSetJson(contKey(id), { animeId: id, title: String(anime.Name), cover: anime.Cover || "", file: current.file, label: current.label, pos: Math.floor(time), dur: Math.floor(duration), t: Date.now() });
+        if (anime) stateSetJson(contKey(id), { animeId: id, title: String(anime.Name), cover: anime.Cover || "", file: current.file, ep: current.number ? String(current.number) : current.file.split("/").pop(), label: current.label, pos: Math.floor(time), dur: Math.floor(duration), t: Date.now() });
       }
     },
     [current, id, markWatched, anime]

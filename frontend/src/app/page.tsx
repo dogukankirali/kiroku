@@ -11,10 +11,32 @@ import { API_URL } from "../constants/Constants";
 import { AnimeService } from "../Services/AnimeServices";
 import { useAuth } from "../contexts/AuthContext";
 import { palette } from "../theme/customTheme";
+import { stateList, stateSync } from "../lib/userState";
 
 interface WatchItem {
   id: number;
   anime: { ID: number; Name: string; Cover: string };
+}
+
+// Half-watched episodes and half-read chapters (written by the Salon player and the manga reader, synced per account)
+interface ContinueItem {
+  kind: "watch" | "read";
+  title: string;
+  cover: string;
+  detail: string;
+  progress: number;
+  href: string;
+  t: number;
+}
+
+function loadContinue(): ContinueItem[] {
+  const watch = stateList<{ animeId: number; title: string; cover?: string; ep?: string; label?: string; pos: number; dur: number; t: number }>("salon.cont:").map(
+    (w): ContinueItem => ({ kind: "watch", title: w.title, cover: w.cover ?? "", detail: w.label ?? "", progress: w.dur ? w.pos / w.dur : 0, href: `/salon?id=${w.animeId}${w.ep ? `&ep=${encodeURIComponent(w.ep)}` : ""}`, t: w.t })
+  );
+  const read = stateList<{ mangaId: number; title: string; cover?: string; chapterId: number; number: number; page: number; count: number; t: number }>("read.cont:").map(
+    (r): ContinueItem => ({ kind: "read", title: r.title, cover: r.cover ?? "", detail: `Bölüm ${r.number} · sayfa ${r.page + 1}/${r.count}`, progress: r.count ? (r.page + 1) / r.count : 0, href: `/manga/read?id=${r.mangaId}&ch=${r.chapterId}`, t: r.t })
+  );
+  return [...watch, ...read].sort((a, b) => b.t - a.t).slice(0, 12);
 }
 
 const library = navSections.find((s) => s.title === "Kütüphane")?.items ?? [];
@@ -49,6 +71,12 @@ export default function HomePage() {
   const { user } = useAuth();
   const [animeCount, setAnimeCount] = useState<number | null>(null);
   const [watchlist, setWatchlist] = useState<WatchItem[] | null>(null);
+  const [resume, setResume] = useState<ContinueItem[]>([]);
+
+  useEffect(() => {
+    setResume(loadContinue()); // local copy first (after hydration), then the account's copy
+    Promise.all([stateSync("salon.cont:"), stateSync("read.cont:")]).then(() => setResume(loadContinue()));
+  }, []);
 
   useEffect(() => {
     AnimeService.getAnimes({ page: 1, count: 1, filters: [] }).then((res) =>
@@ -88,6 +116,26 @@ export default function HomePage() {
         <StatCard label="Arşivdeki anime" value={animeCount} href="/anime" />
         <StatCard label="Watchlist'te bekleyen" value={watchlist ? watchlist.length : null} href="/watchlist" />
       </Box>
+
+      {resume.length > 0 && (
+        <>
+          <Typography sx={{ fontWeight: 700, fontSize: "1.05rem", mb: 1.5 }}>Devam et</Typography>
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(3, minmax(0, 1fr))", sm: "repeat(4, minmax(0, 1fr))", md: "repeat(6, minmax(0, 1fr))" }, gap: 2, mb: 4 }}>
+            {resume.slice(0, 6).map((item) => (
+              <Box key={`${item.kind}:${item.href}`} component={Link} href={item.href} sx={{ textDecoration: "none", color: "inherit" }}>
+                <Box sx={{ position: "relative", aspectRatio: "2/3", borderRadius: "14px", overflow: "hidden", backgroundColor: palette.surface, mb: 1 }}>
+                  {item.cover && <img src={item.cover} alt="" loading="lazy" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
+                  <Box sx={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 4, backgroundColor: alpha(palette.ink, 0.6) }}>
+                    <Box sx={{ width: `${Math.min(100, Math.max(0, item.progress * 100))}%`, height: "100%", backgroundColor: palette.primary }} />
+                  </Box>
+                </Box>
+                <Typography noWrap sx={{ fontSize: "0.8rem", fontWeight: 500 }}>{item.title}</Typography>
+                <Typography noWrap sx={{ fontSize: "0.72rem", color: palette.textMuted }}>{item.kind === "watch" ? "İzleniyor" : "Okunuyor"}{item.detail ? ` · ${item.detail}` : ""}</Typography>
+              </Box>
+            ))}
+          </Box>
+        </>
+      )}
 
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5 }}>
         <Typography sx={{ fontWeight: 700, fontSize: "1.05rem" }}>Sıradaki izlemeler</Typography>
