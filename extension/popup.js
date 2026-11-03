@@ -842,6 +842,10 @@ async function handleUpdateFromStreaming(tabId) {
     }
 }
 
+document.getElementById('open-bookmark-scores').addEventListener('click', () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('bookmark-scores.html') });
+});
+
 document.getElementById('open-manga-downloader').addEventListener('click', () => {
     chrome.tabs.create({ url: chrome.runtime.getURL('manga-downloader.html') });
 });

@@ -445,3 +445,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true;
 });
+
+// ============================================================
+// Yer imlerinden puan aktarma sayfası (bookmark-scores.html): { items: [{ title, score }], dryRun } -> /api/anime/import-scores
+// ============================================================
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action !== "importAnimeScores") return;
+    chrome.storage.local.get(["service_url", "auth_token"], async (result) => {
+        const serviceUrl = (result.service_url || "").trim().replace(/\/+$/, "");
+        if (!serviceUrl) return sendResponse({ success: false, error: "Eklentide Service URL ayarlı değil" });
+        try {
+            const res = await fetch(`${serviceUrl}/api/anime/import-scores`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", ...authHeader(result.auth_token) },
+                body: JSON.stringify({ items: request.items, dryRun: Boolean(request.dryRun) }),
+                credentials: "omit",
+            });
+            const data = await res.json().catch(() => null);
+            if (res.status === 401) return sendResponse({ success: false, error: LOGIN_REQUIRED });
+            if (!res.ok) return sendResponse({ success: false, error: data?.message || `Hata (${res.status})` });
+            sendResponse({ success: true, data: data.data });
+        } catch (err) {
+            sendResponse({ success: false, error: err.message });
+        }
+    });
+    return true;
+});
