@@ -728,7 +728,13 @@ export default function SalonPlayer({
         }}
         onProgress={(e) => {
           const v = e.currentTarget;
-          if (audioRef.current === null && v.duration && v.buffered.length) setBuffered(v.buffered.end(v.buffered.length - 1) / v.duration);
+          // Grey bar: how far ahead the browser has downloaded from the current position (also in the restart-on-seek streams)
+          const t = totalRef.current || v.duration;
+          if (t && v.buffered.length) {
+            let end = v.buffered.end(v.buffered.length - 1);
+            for (let i = 0; i < v.buffered.length; i++) if (v.buffered.start(i) <= v.currentTime + 0.5 && v.buffered.end(i) >= v.currentTime) end = v.buffered.end(i);
+            setBuffered(Math.min(1, ((audioRef.current !== null ? (baseRef.current ?? 0) : 0) + end) / t));
+          }
         }}
         onVolumeChange={(e) => {
           setMuted(e.currentTarget.muted);
