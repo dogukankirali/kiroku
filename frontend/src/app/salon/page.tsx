@@ -16,6 +16,7 @@ import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 import { AnimeService } from "../../Services/AnimeServices";
 import { palette } from "../../theme/customTheme";
 import { stateGet, stateSet, stateSetJson, stateSync } from "../../lib/userState";
+import SalonHome from "../../components/salon/SalonHome";
 import SalonPlayer from "../../components/salon/SalonPlayer";
 import SubtitleFinder from "../../components/salon/SubtitleFinder";
 import {
@@ -504,10 +505,14 @@ function Salon() {
   );
 }
 
+function SalonRoute() {
+  return useSearchParams().get("id") ? <Salon /> : <SalonHome />;
+}
+
 export default function SalonPage() {
   return (
     <Suspense fallback={null}>
-      <Salon />
+      <SalonRoute />
     </Suspense>
   );
 }

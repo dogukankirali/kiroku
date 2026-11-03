@@ -8,6 +8,7 @@ import CollectionsBookmarkOutlinedIcon from "@mui/icons-material/CollectionsBook
 import TheatersOutlinedIcon from "@mui/icons-material/TheatersOutlined";
 import BookmarksOutlinedIcon from "@mui/icons-material/BookmarksOutlined";
 import HourglassTopRoundedIcon from "@mui/icons-material/HourglassTopRounded";
+import PlayCircleOutlineRoundedIcon from "@mui/icons-material/PlayCircleOutlineRounded";
 import BookmarkAddedOutlinedIcon from "@mui/icons-material/BookmarkAddedOutlined";
 
 export interface NavItem {
@@ -31,6 +32,7 @@ export const navSections: NavSection[] = [
     title: "Kütüphane",
     items: [
       { label: "Anime", href: "/anime", icon: <MovieOutlinedIcon />, description: "İzlediğin ve izleyeceğin animeler" },
+      { label: "Salon", href: "/salon", icon: <PlayCircleOutlineRoundedIcon />, description: "Video kütüphanenden izle" },
       { label: "Manga", href: "/manga", icon: <MenuBookOutlinedIcon />, description: "Okuma listen" },
       { label: "Kitaplar", href: "/book", icon: <AutoStoriesOutlinedIcon />, description: "Kitap arşivin" },
       { label: "Diziler", href: "/series", icon: <LiveTvOutlinedIcon />, description: "Dizi takibi" },
